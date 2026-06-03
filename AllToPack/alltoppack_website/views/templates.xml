@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ============================================================
+         LANDING PAGE — herda website.homepage e substitui o conteúdo
+         ============================================================ -->
+    <template id="homepage" inherit_id="website.homepage" name="AllToPack Homepage">
+        <xpath expr="//div[@id='wrap']" position="replace">
+            <div id="wrap">
+
+                <!-- ── HERO ── -->
+                <section class="atp-hero d-flex align-items-center">
+                    <div class="container text-center">
+                        <h1 class="atp-hero__title">Embalagens que protegem o que importa</h1>
+                        <p class="atp-hero__subtitle">
+                            Soluções completas em embalagem para o seu negócio.
+                        </p>
+                        <a href="/shop" class="btn atp-btn-primary atp-btn-primary--lg mt-3">
+                            Ver Produtos
+                        </a>
+                    </div>
+                </section>
+
+                <!-- ── FEATURES ── -->
+                <section class="atp-features py-5">
+                    <div class="container">
+                        <div class="row g-4 text-center">
+                            <div class="col-md-4">
+                                <div class="atp-feature-card p-4">
+                                    <div class="atp-feature-card__icon mb-3">
+                                        <i class="fa fa-shield fa-2x"/>
+                                    </div>
+                                    <h3 class="atp-feature-card__title">Qualidade garantida</h3>
+                                    <p class="atp-feature-card__text">
+                                        Materiais certificados e testados para proteger os seus produtos.
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="atp-feature-card p-4">
+                                    <div class="atp-feature-card__icon mb-3">
+                                        <i class="fa fa-truck fa-2x"/>
+                                    </div>
+                                    <h3 class="atp-feature-card__title">Entrega rápida</h3>
+                                    <p class="atp-feature-card__text">
+                                        Logística eficiente para que receba a sua encomenda no prazo.
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="atp-feature-card p-4">
+                                    <div class="atp-feature-card__icon mb-3">
+                                        <i class="fa fa-leaf fa-2x"/>
+                                    </div>
+                                    <h3 class="atp-feature-card__title">Sustentável</h3>
+                                    <p class="atp-feature-card__text">
+                                        Opções eco-friendly que respeitam o meio ambiente.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ── PRODUTOS EM DESTAQUE ── -->
+                <section class="atp-featured-products py-5">
+                    <div class="container">
+                        <h2 class="atp-section-title text-center mb-4">Produtos em Destaque</h2>
+                        <div class="text-center mt-4">
+                            <a href="/shop" class="btn atp-btn-secondary">
+                                Ver todos os produtos
+                            </a>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ── CTA FINAL ── -->
+                <section class="atp-cta py-5">
+                    <div class="container text-center">
+                        <h2 class="atp-cta__title">Pronto para encomendar?</h2>
+                        <p class="atp-cta__text mb-4">
+                            Fale connosco e encontre a solução certa para o seu negócio.
+                        </p>
+                        <a href="/contactus" class="btn atp-btn-primary">
+                            Contacte-nos
+                        </a>
+                    </div>
+                </section>
+
+            </div>
+        </xpath>
+    </template>
+
+</odoo>

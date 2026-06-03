@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="product_page" inherit_id="website_sale.product" name="AllToPack Product Page">
+
+        <!-- Breadcrumb acima do conteúdo principal -->
+        <xpath expr="//div[@id='wrap']" position="inside">
+            <div class="atp-breadcrumb py-2">
+                <div class="container">
+                    <ol class="breadcrumb mb-0">
+                        <li class="breadcrumb-item"><a href="/">Início</a></li>
+                        <li class="breadcrumb-item"><a href="/shop">Produtos</a></li>
+                        <li class="breadcrumb-item active" t-esc="product.name"/>
+                    </ol>
+                </div>
+            </div>
+        </xpath>
+
+        <!-- Blocos de info no fim da página -->
+        <xpath expr="//div[@id='wrap']" position="inside">
+            <div class="atp-product-extra container py-4">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="atp-info-block p-3">
+                            <h5 class="atp-info-block__title"><i class="fa fa-truck me-2"/>Entrega</h5>
+                            <p class="atp-info-block__text mb-0">Entrega em 2 a 5 dias úteis. Portes grátis acima de 50€.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="atp-info-block p-3">
+                            <h5 class="atp-info-block__title"><i class="fa fa-undo me-2"/>Devoluções</h5>
+                            <p class="atp-info-block__text mb-0">30 dias para devolver, sem questões.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="atp-info-block p-3">
+                            <h5 class="atp-info-block__title"><i class="fa fa-headphones me-2"/>Suporte</h5>
+                            <p class="atp-info-block__text mb-0">Dúvidas? Contacte a nossa equipa por email ou telefone.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </xpath>
+
+    </template>
+
+</odoo>

@@ -1,0 +1,369 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="dieline_page" name="Dieline Engine">
+        <t t-call="website.layout">
+            <t t-set="title">
+                <t t-if="product">Dieline — <t t-esc="product.name"/> — AllToPack</t>
+                <t t-else="">Configurador de Caixas — AllToPack</t>
+            </t>
+            <t t-set="head">
+                <link rel="stylesheet" href="/alltoppack_website/static/src/css/dieline.css"/>
+            </t>
+
+            <div id="wrap" class="atp-dieline-wrap">
+                <div class="atp-dl-page">
+
+                    <!-- ── BODY: viewer (esquerda) + sidebar cards (direita) ── -->
+                    <div class="atp-dl-body">
+
+                        <!-- VIEWER -->
+                        <div class="atp-dl-viewer" id="atp-dl-viewer">
+                            <!-- 3D canvas -->
+                            <canvas id="canvas3d" class="atp-dl-canvas3d"/>
+                            <!-- 2D dieline SVG (hidden by default) -->
+                            <div id="atp-2d-view" class="atp-dl-2dview" style="display:none">
+                                <img id="atp-2d-img" alt="Dieline 2D"/>
+                            </div>
+                            <!-- Hint flutuante -->
+                            <span id="atp-viewer-hint" class="atp-dl-viewer-hint">
+                                arrastar para rodar · scroll para zoom
+                            </span>
+                            <!-- Nome do produto -->
+                            <t t-if="product">
+                                <span class="atp-dl-viewer-title">
+                                    <t t-esc="product.name"/>
+                                </span>
+                            </t>
+                        </div>
+
+                        <!-- RIGHT SIDEBAR — accordion cards -->
+                        <div class="atp-dl-sidebar">
+                            <div class="accordion accordion-flush" id="atp-accord">
+
+                                <!-- 1. Internal Dimensions -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-dims"
+                                                aria-expanded="true" aria-controls="acc-dims">
+                                            <i class="fa fa-arrows-alt me-2 text-primary"/>Internal Dimensions
+                                        </button>
+                                    </h2>
+                                    <div id="acc-dims" class="accordion-collapse collapse show" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-dim-grid">
+                                                <div class="atp-dim-field">
+                                                    <label>L (mm)</label>
+                                                    <input type="number" id="iL" t-att-value="box_l" min="40" max="600"/>
+                                                </div>
+                                                <div class="atp-dim-field">
+                                                    <label>W (mm)</label>
+                                                    <input type="number" id="iW" t-att-value="box_w" min="30" max="600"/>
+                                                </div>
+                                                <div class="atp-dim-field">
+                                                    <label>H (mm)</label>
+                                                    <input type="number" id="iH" t-att-value="box_h" min="30" max="600"/>
+                                                </div>
+                                            </div>
+                                            <button id="btnApply" class="atp-card-btn mt-2 w-100">
+                                                <i class="fa fa-check me-1"/>Apply Dimensions
+                                            </button>
+                                            <div class="atp-dl-info mt-2">
+                                                <span id="infoBlank" class="small text-muted"/>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 2. Material -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-material"
+                                                aria-expanded="false" aria-controls="acc-material">
+                                            <i class="fa fa-cube me-2 text-primary"/>Material
+                                        </button>
+                                    </h2>
+                                    <div id="acc-material" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-option-group">
+                                                <label class="atp-option-label">
+                                                    <input type="radio" name="material" value="e_flute" checked="True"/>
+                                                    E-Flute (1.5mm)
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="radio" name="material" value="b_flute"/>
+                                                    B-Flute (3mm)
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="radio" name="material" value="bc_flute"/>
+                                                    BC-Flute (6mm)
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="radio" name="material" value="solid"/>
+                                                    Solid Board (0.5mm)
+                                                </label>
+                                            </div>
+                                            <p class="small text-muted mt-2 mb-0">
+                                                <i class="fa fa-info-circle me-1"/>Grammage: 300–450 g/m²
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 3. Windows and Cutouts -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-windows"
+                                                aria-expanded="false" aria-controls="acc-windows">
+                                            <i class="fa fa-th-large me-2 text-primary"/>Windows and Cutouts
+                                        </button>
+                                    </h2>
+                                    <div id="acc-windows" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-option-group">
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="window" value="front"/>
+                                                    Front window
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="window" value="top"/>
+                                                    Top window
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="window" value="side"/>
+                                                    Side window
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="window" value="handle"/>
+                                                    Handle cutout
+                                                </label>
+                                            </div>
+                                            <p class="small text-muted mt-2 mb-0">Window dimensions configured at production stage.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 4. Special Finishes -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-finishes"
+                                                aria-expanded="false" aria-controls="acc-finishes">
+                                            <i class="fa fa-star me-2 text-primary"/>Special Finishes
+                                        </button>
+                                    </h2>
+                                    <div id="acc-finishes" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-option-group">
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="finish" value="gloss_laminate"/>
+                                                    Gloss laminate
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="finish" value="matte_laminate"/>
+                                                    Matte laminate
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="finish" value="spot_uv"/>
+                                                    Spot UV
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="finish" value="embossing"/>
+                                                    Embossing / Debossing
+                                                </label>
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="finish" value="hot_foil"/>
+                                                    Hot foil stamping
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 5. Quantity and Design Variants -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-qty"
+                                                aria-expanded="false" aria-controls="acc-qty">
+                                            <i class="fa fa-sliders me-2 text-primary"/>Quantity and Design Variants
+                                        </button>
+                                    </h2>
+                                    <div id="acc-qty" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-dim-field mb-2">
+                                                <label>Quantity (units)</label>
+                                                <input type="number" value="500" min="100" step="100"/>
+                                            </div>
+                                            <div class="atp-dim-field mb-2">
+                                                <label>Design variants</label>
+                                                <input type="number" value="1" min="1" max="10"/>
+                                            </div>
+                                            <div class="atp-option-group">
+                                                <label class="atp-option-label">
+                                                    <input type="checkbox" name="variant" value="print_both"/>
+                                                    Print both sides
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 6. Dieline Template -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-dieline"
+                                                aria-expanded="false" aria-controls="acc-dieline">
+                                            <i class="fa fa-file-image-o me-2 text-primary"/>Dieline Template
+                                        </button>
+                                    </h2>
+                                    <div id="acc-dieline" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <p class="small text-muted mb-2">
+                                                Download the dieline as an editable SVG with current dimensions.
+                                            </p>
+                                            <button id="btnDownloadSVG" class="atp-card-btn w-100">
+                                                <i class="fa fa-download me-1"/>Download SVG
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 7. File Upload and 3D Mockup -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-upload"
+                                                aria-expanded="false" aria-controls="acc-upload">
+                                            <i class="fa fa-upload me-2 text-primary"/>File Upload &amp; 3D Mockup
+                                        </button>
+                                    </h2>
+                                    <div id="acc-upload" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <p class="small text-muted mb-2">
+                                                Upload your artwork to preview on the 3D model.
+                                                Supports PNG, JPG, PDF.
+                                            </p>
+                                            <label class="atp-card-btn w-100 text-center" for="fileArtwork" style="cursor:pointer">
+                                                <i class="fa fa-folder-open me-1"/>Choose file…
+                                            </label>
+                                            <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
+                                            <span id="artworkName" class="small text-muted d-block mt-1">No file selected</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 8. Manufacturing Time -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#acc-mfg"
+                                                aria-expanded="false" aria-controls="acc-mfg">
+                                            <i class="fa fa-clock-o me-2 text-primary"/>Manufacturing Time
+                                        </button>
+                                    </h2>
+                                    <div id="acc-mfg" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
+                                        <div class="accordion-body">
+                                            <div class="atp-mfg-info">
+                                                <div class="atp-mfg-row">
+                                                    <span>Standard production</span>
+                                                    <strong>10–14 business days</strong>
+                                                </div>
+                                                <div class="atp-mfg-row">
+                                                    <span>Express production</span>
+                                                    <strong>5–7 business days</strong>
+                                                </div>
+                                                <div class="atp-mfg-row">
+                                                    <span>Shipping (EU)</span>
+                                                    <strong>2–3 business days</strong>
+                                                </div>
+                                            </div>
+                                            <p class="small text-muted mt-2 mb-0">
+                                                Times are estimates and may vary based on quantity and finishes.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div><!-- /accordion -->
+
+                            <!-- Request quote -->
+                            <div class="p-3">
+                                <a href="/contactus" class="btn btn-primary w-100">
+                                    <i class="fa fa-envelope me-1"/>Request a Quote
+                                </a>
+                            </div>
+
+                        </div><!-- /sidebar -->
+                    </div><!-- /body -->
+
+                    <!-- ── CONTROL BAR (bottom center) ── -->
+                    <div class="atp-dl-controls">
+                        <!-- View toggle -->
+                        <div class="atp-ctrl-group">
+                            <button id="ctrl-3d" class="atp-ctrl active" title="Vista 3D">
+                                <i class="fa fa-cube"/> 3D
+                            </button>
+                            <button id="ctrl-2d" class="atp-ctrl" title="Vista 2D — Dieline">
+                                <i class="fa fa-th"/> 2D
+                            </button>
+                        </div>
+
+                        <div class="atp-ctrl-sep"/>
+
+                        <!-- Animation -->
+                        <div class="atp-ctrl-group">
+                            <button id="ctrl-anim" class="atp-ctrl" title="Animar abertura/fecho">
+                                <i class="fa fa-play" id="ctrl-anim-icon"/>
+                            </button>
+                            <input type="range" id="animSlider" min="0" max="100" value="0" class="atp-dl-slider" title="Posição da animação"/>
+                            <span id="animPct" class="atp-dl-pct">0%</span>
+                        </div>
+
+                        <div class="atp-ctrl-sep"/>
+
+                        <!-- Rotation + Zoom + Reset -->
+                        <div class="atp-ctrl-group">
+                            <button id="ctrl-rotate" class="atp-ctrl" title="Auto-rodar">
+                                <i class="fa fa-refresh"/>
+                            </button>
+                            <button id="ctrl-zoom-in" class="atp-ctrl" title="Zoom +">
+                                <i class="fa fa-plus"/>
+                            </button>
+                            <button id="ctrl-zoom-out" class="atp-ctrl" title="Zoom −">
+                                <i class="fa fa-minus"/>
+                            </button>
+                            <button id="ctrl-reset" class="atp-ctrl" title="Repor vista">
+                                <i class="fa fa-undo"/>
+                            </button>
+                        </div>
+                    </div><!-- /controls -->
+
+                </div><!-- /page -->
+            </div><!-- /wrap -->
+
+            <!-- Config injectada pelo controller -->
+            <script>
+                window.ATP_CONFIG = {
+                    boxType: '<t t-esc="box_type"/>',
+                    L: <t t-esc="box_l"/>,
+                    W: <t t-esc="box_w"/>,
+                    H: <t t-esc="box_h"/>,
+                    dielineSvgUrl: '<t t-esc="dieline_svg_url"/>'
+                };
+            </script>
+
+            <t t-set="options" t-value="{'defer_scripts': False}"/>
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"/>
+            <!-- Parser deve ser carregado antes do engine -->
+            <script src="/alltoppack_website/static/src/js/dieline_parser.js"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js"/>
+
+        </t>
+    </template>
+
+</odoo>

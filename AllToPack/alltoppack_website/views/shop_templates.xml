@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ============================================================
+         PRODUCTS PAGE (/shop) — header + BoxFinder sidebar
+         ============================================================ -->
+    <template id="shop_page" inherit_id="website_sale.products" name="AllToPack Shop">
+
+        <!-- Cabeçalho da shop -->
+        <xpath expr="//div[@id='wrap']" position="inside">
+            <div class="atp-shop-header py-4">
+                <div class="container">
+                    <h1 class="atp-shop-header__title">Os Nossos Produtos</h1>
+                    <p class="atp-shop-header__subtitle">
+                        Encontre a embalagem certa para cada necessidade.
+                    </p>
+                </div>
+            </div>
+            <div class="atp-shop-banner container mb-4">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <p class="atp-shop-banner__text mb-0">
+                            <i class="fa fa-tag me-2"/>
+                            Preços especiais para encomendas a granel —
+                            <a href="/contactus">fale connosco</a>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </xpath>
+
+        <!-- Força o sidebar a estar sempre visível -->
+        <xpath expr="//t[@t-set='hasLeftColumn']" position="replace">
+            <t t-set="hasLeftColumn" t-value="True"/>
+        </xpath>
+
+        <!-- Garante que a grelha de produtos usa sempre col-lg-9 -->
+        <xpath expr="//div[@id='products_grid']" position="attributes">
+            <attribute name="t-attf-class">#{'o_wsale_layout_list' if layout_mode == 'list' else ''} col-lg-9</attribute>
+        </xpath>
+
+        <!-- BoxFinder card — antes das categorias no sidebar -->
+        <xpath expr="//div[@t-if='opt_wsale_categories']" position="before">
+            <div class="atp-sidebar-card atp-boxfinder mb-3">
+                <div class="atp-sidebar-card__title">
+                    <i class="fa fa-search me-1"/>BoxFinder
+                </div>
+                <p class="atp-sidebar-card__sub">
+                    Enter the dimensions of your product and see all the available boxes.
+                </p>
+                <label class="atp-bf-label">Dimensions</label>
+                <div class="atp-bf-dims-row">
+                    <div class="atp-bf-dim">
+                        <input type="number" id="atp-bf-l" placeholder="L" min="1" aria-label="Length"/>
+                        <span class="atp-bf-unit">mm</span>
+                    </div>
+                    <div class="atp-bf-dim">
+                        <input type="number" id="atp-bf-w" placeholder="W" min="1" aria-label="Width"/>
+                        <span class="atp-bf-unit">mm</span>
+                    </div>
+                    <div class="atp-bf-dim">
+                        <input type="number" id="atp-bf-h" placeholder="H" min="1" aria-label="Height"/>
+                        <span class="atp-bf-unit">mm</span>
+                    </div>
+                </div>
+                <button id="atp-bf-find" class="atp-bf-btn mt-3">Find Boxes</button>
+                <button id="atp-bf-reset" class="atp-bf-btn atp-bf-btn--reset mt-1" style="display:none">
+                    <i class="fa fa-times me-1"/>Clear filter
+                </button>
+                <div id="atp-bf-noresult" class="atp-bf-noresult" style="display:none">
+                    No matching boxes found.
+                </div>
+            </div>
+        </xpath>
+
+        <!-- Substitui o price range pelo card "Looking for a different box model?" -->
+        <xpath expr="//t[@t-call='website_sale.filter_products_price']" position="replace">
+            <div class="atp-sidebar-card atp-sidebar-contact mt-3">
+                <div class="atp-sidebar-card__title">
+                    <i class="fa fa-question-circle me-1"/>Looking for a different box model?
+                </div>
+                <p class="atp-sidebar-card__sub">Let us know what you need.</p>
+                <a href="/contactus" class="atp-contact-btn">Request now</a>
+            </div>
+        </xpath>
+
+    </template>
+
+    <!-- ============================================================
+         PRODUTO NA GRELHA:
+         • data-box-* para o BoxFinder JS
+         • Overlay SVG na área de imagem (normal → hover)
+         • Botão "Ver Dieline" na barra de acções
+         ============================================================ -->
+    <template id="product_item_custom" inherit_id="website_sale.products_item" name="AllToPack Product Item">
+
+        <!-- Adiciona data attributes ao form para o BoxFinder JS filtrar -->
+        <xpath expr="//form[hasclass('oe_product_cart')]" position="attributes">
+            <attribute name="t-att-data-box-l">product.box_l or 0</attribute>
+            <attribute name="t-att-data-box-w">product.box_w or 0</attribute>
+            <attribute name="t-att-data-box-h">product.box_h or 0</attribute>
+            <attribute name="t-att-data-box-type">product.box_type or ''</attribute>
+        </xpath>
+
+        <!-- Overlay SVG dentro da div.oe_product_image (position:absolute, cobre toda a área) -->
+        <xpath expr="//div[hasclass('oe_product_image')]" position="inside">
+            <t t-if="product.box_type">
+                <a t-att-href="'/dieline?product_id=%d' % product.id"
+                   class="atp-box-overlay"
+                   t-att-title="'Configurar ' + product.name">
+                    <img class="atp-box-icon atp-box-icon--normal"
+                         t-att-src="'/alltoppack_website/static/src/img/%s_normal.svg' % product.box_type"
+                         t-att-alt="product.name"/>
+                    <img class="atp-box-icon atp-box-icon--hover"
+                         t-att-src="'/alltoppack_website/static/src/img/%s_hover.svg' % product.box_type"
+                         t-att-alt="product.name"/>
+                    <img class="atp-box-icon atp-box-icon--dieline"
+                         t-att-src="'/alltoppack_website/static/src/img/%s_dieline.svg' % product.box_type"
+                         t-att-alt="product.name + ' 2D'"/>
+                </a>
+            </t>
+        </xpath>
+
+        <!-- Badge "Novo" antes dos botões de acção -->
+        <xpath expr="//div[hasclass('o_wsale_product_btn')]" position="before">
+            <t t-if="product.create_date and (datetime.datetime.now() - product.create_date).days &lt; 30">
+                <span class="atp-badge atp-badge--new">Novo</span>
+            </t>
+        </xpath>
+
+        <!-- Botão "Ver Dieline" na barra de botões do card -->
+        <xpath expr="//div[hasclass('o_wsale_product_btn')]" position="inside">
+            <t t-if="product.box_type">
+                <a t-att-href="'/dieline?product_id=%d' % product.id"
+                   class="atp-dieline-btn-small"
+                   t-att-title="'Dieline ' + product.name">
+                    <i class="fa fa-cut me-1"/>Ver Dieline
+                </a>
+            </t>
+        </xpath>
+
+    </template>
+
+    <!-- ============================================================
+         BOTÃO 2D / 3D — antes do btn-group de layout (grid/list)
+         ============================================================ -->
+    <template id="atp_view_toggle" inherit_id="website_sale.add_grid_or_list_option" name="AllToPack 2D/3D Toggle">
+        <xpath expr="//div[contains(@t-attf-class,'o_wsale_apply_layout')]" position="before">
+            <div class="btn-group atp-view-toggle me-2" role="group" aria-label="Modo de visualização">
+                <input type="radio" class="btn-check" id="atp-radio-3d" name="atp_view_mode" checked="True" autocomplete="off"/>
+                <label class="btn btn-sm btn-outline-secondary" for="atp-radio-3d" title="Vista 3D">
+                    <i class="fa fa-cube me-1"/>3D
+                </label>
+                <input type="radio" class="btn-check" id="atp-radio-2d" name="atp_view_mode" autocomplete="off"/>
+                <label class="btn btn-sm btn-outline-secondary" for="atp-radio-2d" title="Vista 2D — Dieline">
+                    <i class="fa fa-object-ungroup me-1"/>2D
+                </label>
+            </div>
+        </xpath>
+    </template>
+
+</odoo>

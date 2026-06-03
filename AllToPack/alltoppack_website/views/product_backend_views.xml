@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Adiciona tab "Dieline" no formulário de produto (backend) -->
+    <record id="product_template_form_view_dieline" model="ir.ui.view">
+        <field name="name">product.template.form.dieline</field>
+        <field name="model">product.template</field>
+        <field name="inherit_id" ref="product.product_template_form_view"/>
+        <field name="arch" type="xml">
+            <notebook position="inside">
+                <page string="Dieline 3D" name="dieline_3d">
+                    <group>
+                        <group string="Tipo e Dimensões">
+                            <field name="box_type"/>
+                            <field name="box_l" string="Comprimento L (mm)"/>
+                            <field name="box_w" string="Largura W (mm)"/>
+                            <field name="box_h" string="Altura H (mm)"/>
+                        </group>
+                        <group string="SVG de Dieline">
+                            <field name="box_dieline_svg" widget="binary"
+                                   filename="box_dieline_svg_fname"
+                                   string="Ficheiro SVG anotado"/>
+                            <field name="box_dieline_svg_fname" invisible="1"/>
+                            <div class="text-muted small" colspan="2">
+                                Carregue um SVG gerado pelo motor de dieline (com ids face_front,
+                                face_back, face_left, face_right, face_bottom, face_lid).
+                                As dimensões L/W/H serão lidas automaticamente do SVG.
+                            </div>
+                        </group>
+                    </group>
+                    <div class="mt-2">
+                        <a class="btn btn-sm btn-outline-primary"
+                           t-attf-href="/dieline?product_id={{ object.id }}"
+                           target="_blank">
+                            <i class="fa fa-cube me-1"/> Ver Dieline 3D
+                        </a>
+                    </div>
+                </page>
+            </notebook>
+        </field>
+    </record>
+
+</odoo>

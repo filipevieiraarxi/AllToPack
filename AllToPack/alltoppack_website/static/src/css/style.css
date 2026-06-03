@@ -1,0 +1,434 @@
+/* ================================================================
+   AllToPack — style.css
+   Convenção BEM: .atp-bloco__elemento--modificador
+   ================================================================ */
+
+/* ── VARIÁVEIS ─────────────────────────────────────────────────── */
+:root {
+    --atp-primary:       #2563eb;
+    --atp-primary-dark:  #1d4ed8;
+    --atp-secondary:     #f59e0b;
+    --atp-text:          #1e293b;
+    --atp-text-muted:    #64748b;
+    --atp-bg-light:      #f8fafc;
+    --atp-bg-dark:       #1e293b;
+    --atp-border:        #e2e8f0;
+    --atp-radius:        8px;
+    --atp-radius-lg:     16px;
+    --atp-shadow:        0 2px 8px rgba(0,0,0,.08);
+    --atp-shadow-lg:     0 8px 24px rgba(0,0,0,.12);
+}
+
+/* ── BOTÕES ────────────────────────────────────────────────────── */
+.atp-btn-primary {
+    background-color: var(--atp-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--atp-radius);
+    padding: .625rem 1.25rem;
+    font-weight: 600;
+    transition: background-color .2s ease, transform .1s ease;
+}
+.atp-btn-primary:hover {
+    background-color: var(--atp-primary-dark);
+    color: #fff;
+    transform: translateY(-1px);
+}
+.atp-btn-primary--lg {
+    padding: .875rem 2rem;
+    font-size: 1.1rem;
+}
+
+.atp-btn-secondary {
+    background-color: transparent;
+    color: var(--atp-primary);
+    border: 2px solid var(--atp-primary);
+    border-radius: var(--atp-radius);
+    padding: .625rem 1.25rem;
+    font-weight: 600;
+    transition: all .2s ease;
+}
+.atp-btn-secondary:hover {
+    background-color: var(--atp-primary);
+    color: #fff;
+}
+
+/* ── TÍTULOS DE SECÇÃO ─────────────────────────────────────────── */
+.atp-section-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--atp-text);
+    position: relative;
+    margin-bottom: 2rem;
+}
+.atp-section-title::after {
+    content: '';
+    display: block;
+    width: 60px;
+    height: 4px;
+    background: var(--atp-primary);
+    margin: .5rem auto 0;
+    border-radius: 2px;
+}
+
+/* ── HERO ──────────────────────────────────────────────────────── */
+.atp-hero {
+    min-height: 90vh;
+    background: linear-gradient(135deg, var(--atp-bg-dark) 0%, #334155 100%);
+    color: #fff;
+}
+.atp-hero__title {
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 1rem;
+}
+.atp-hero__subtitle {
+    font-size: 1.2rem;
+    opacity: .85;
+    max-width: 560px;
+    margin: 0 auto;
+}
+
+/* ── FEATURES ──────────────────────────────────────────────────── */
+.atp-features {
+    background-color: var(--atp-bg-light);
+}
+.atp-feature-card {
+    background: #fff;
+    border-radius: var(--atp-radius-lg);
+    box-shadow: var(--atp-shadow);
+    height: 100%;
+    transition: box-shadow .2s ease, transform .2s ease;
+}
+.atp-feature-card:hover {
+    box-shadow: var(--atp-shadow-lg);
+    transform: translateY(-4px);
+}
+.atp-feature-card__icon {
+    color: var(--atp-primary);
+}
+.atp-feature-card__title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--atp-text);
+    margin-bottom: .5rem;
+}
+.atp-feature-card__text {
+    color: var(--atp-text-muted);
+    font-size: .95rem;
+    margin: 0;
+}
+
+/* ── FEATURED PRODUCTS ─────────────────────────────────────────── */
+.atp-featured-products {
+    background: #fff;
+}
+
+/* ── CTA ───────────────────────────────────────────────────────── */
+.atp-cta {
+    background: linear-gradient(135deg, var(--atp-primary) 0%, var(--atp-primary-dark) 100%);
+    color: #fff;
+}
+.atp-cta__title {
+    font-size: 2rem;
+    font-weight: 700;
+}
+.atp-cta__text {
+    opacity: .9;
+    font-size: 1.1rem;
+}
+.atp-cta .atp-btn-primary {
+    background: #fff;
+    color: var(--atp-primary);
+}
+.atp-cta .atp-btn-primary:hover {
+    background: var(--atp-bg-light);
+}
+
+/* ── SHOP HEADER ───────────────────────────────────────────────── */
+.atp-shop-header {
+    background: var(--atp-bg-dark);
+    color: #fff;
+}
+.atp-shop-header__title {
+    font-size: 2.25rem;
+    font-weight: 800;
+    margin-bottom: .5rem;
+}
+.atp-shop-header__subtitle {
+    opacity: .8;
+    margin: 0;
+}
+
+/* ── SHOP BANNER ───────────────────────────────────────────────── */
+.atp-shop-banner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--atp-radius);
+    padding: .75rem 1.25rem;
+}
+.atp-shop-banner__text {
+    color: var(--atp-primary-dark);
+    font-size: .95rem;
+}
+
+/* ── BADGE NOVO ────────────────────────────────────────────────── */
+.atp-badge {
+    display: inline-block;
+    font-size: .7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: .2rem .55rem;
+    border-radius: 999px;
+    margin-bottom: .5rem;
+}
+.atp-badge--new {
+    background: var(--atp-secondary);
+    color: #fff;
+}
+
+/* ── BREADCRUMB ────────────────────────────────────────────────── */
+.atp-breadcrumb {
+    background: var(--atp-bg-light);
+    border-bottom: 1px solid var(--atp-border);
+}
+.atp-breadcrumb .breadcrumb-item a {
+    color: var(--atp-primary);
+    text-decoration: none;
+}
+.atp-breadcrumb .breadcrumb-item.active {
+    color: var(--atp-text-muted);
+}
+
+/* ── PRODUCT EXTRA (info blocks) ───────────────────────────────── */
+.atp-product-extra {
+    border-top: 1px solid var(--atp-border);
+}
+.atp-info-block {
+    background: var(--atp-bg-light);
+    border-radius: var(--atp-radius);
+    height: 100%;
+}
+.atp-info-block__title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--atp-text);
+    margin-bottom: .5rem;
+}
+.atp-info-block__text {
+    color: var(--atp-text-muted);
+    font-size: .9rem;
+}
+
+/* ── PRICE LABEL ───────────────────────────────────────────────── */
+.atp-price-label {
+    font-size: .8rem;
+}
+
+/* ── RESPONSIVO ────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .atp-hero {
+        min-height: 60vh;
+        padding: 3rem 0;
+    }
+    .atp-hero__title {
+        font-size: 2rem;
+    }
+    .atp-section-title {
+        font-size: 1.5rem;
+    }
+}
+
+
+/* ================================================================
+   SIDEBAR CARDS — BoxFinder + Contact
+   ================================================================ */
+
+.atp-sidebar-card {
+    background: #fff;
+    border: 1px solid var(--atp-border, #e2e8f0);
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.atp-sidebar-card__title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--atp-text, #1e293b);
+    margin-bottom: 6px;
+}
+
+.atp-sidebar-card__sub {
+    font-size: 12px;
+    color: var(--atp-text-muted, #64748b);
+    line-height: 1.45;
+    margin-bottom: 10px;
+}
+
+/* BoxFinder */
+.atp-bf-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+}
+
+.atp-bf-dims-row {
+    display: flex;
+    gap: 6px;
+}
+
+.atp-bf-dim {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+}
+
+.atp-bf-dim input[type="number"] {
+    width: 100%;
+    text-align: center;
+    padding: 5px 2px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #1e293b;
+    background: #f8fafc;
+    min-width: 0;
+    -moz-appearance: textfield;
+}
+.atp-bf-dim input[type="number"]::-webkit-inner-spin-button,
+.atp-bf-dim input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+.atp-bf-dim input[type="number"]:focus {
+    outline: none;
+    border-color: var(--atp-primary, #2563eb);
+    background: #fff;
+}
+
+.atp-bf-unit {
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1;
+}
+
+.atp-bf-btn {
+    display: block;
+    width: 100%;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--atp-primary, #2563eb);
+    color: #fff;
+    transition: background .15s;
+    text-align: center;
+}
+.atp-bf-btn:hover { background: var(--atp-primary-dark, #1d4ed8); }
+.atp-bf-btn--reset {
+    background: transparent;
+    color: var(--atp-text-muted, #64748b);
+    border: 1px solid #e2e8f0;
+    font-weight: 500;
+    font-size: 11px;
+    padding: 5px 12px;
+}
+.atp-bf-btn--reset:hover { background: #f1f5f9; color: #1e293b; }
+
+.atp-bf-noresult {
+    font-size: 12px;
+    color: #ef4444;
+    margin-top: 6px;
+    text-align: center;
+}
+
+/* Contact card */
+.atp-sidebar-contact {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border-color: #bfdbfe;
+}
+.atp-sidebar-contact .atp-sidebar-card__title { color: #1d4ed8; }
+
+.atp-contact-btn {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    background: var(--atp-primary, #2563eb);
+    color: #fff;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background .15s;
+}
+.atp-contact-btn:hover { background: var(--atp-primary-dark, #1d4ed8); color: #fff; }
+
+/* ================================================================
+   BOX SVG OVERLAY — cobre a área de imagem de cada product card
+   ================================================================ */
+
+/* Overlay que cobre toda a div.oe_product_image */
+.atp-box-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8fafc;
+    z-index: 5;
+    text-decoration: none;
+}
+
+/* Todos os ícones SVG sobrepostos e centrados */
+.atp-box-icon {
+    position: absolute;
+    width: 72%;
+    max-width: 160px;
+    height: auto;
+    object-fit: contain;
+    transition: opacity .25s ease, transform .25s ease;
+}
+
+/* Estado normal (3D) */
+.atp-box-icon--normal  { opacity: 1;  transform: scale(1); }
+.atp-box-icon--hover   { opacity: 0;  transform: scale(1); }
+.atp-box-icon--dieline { opacity: 0;  transform: scale(1); width: 88%; max-width: 200px; }
+
+/* Hover (3D): troca icon + enlargement 18% */
+.atp-box-overlay:hover .atp-box-icon--normal { opacity: 0; transform: scale(1.18); }
+.atp-box-overlay:hover .atp-box-icon--hover  { opacity: 1; transform: scale(1.18); }
+
+/* ── Modo 2D ──────────────────────────────────────────────────── */
+#products_grid.atp-view-2d .atp-box-icon--normal,
+#products_grid.atp-view-2d .atp-box-icon--hover { opacity: 0 !important; transform: scale(1) !important; }
+#products_grid.atp-view-2d .atp-box-overlay:hover .atp-box-icon--normal,
+#products_grid.atp-view-2d .atp-box-overlay:hover .atp-box-icon--hover { opacity: 0 !important; transform: scale(1) !important; }
+#products_grid.atp-view-2d .atp-box-icon--dieline { opacity: 1; }
+/* Sem cursor pointer extra no modo 2D (mantém o cursor:pointer do overlay) */
+
+/* ── BOTÃO "VER DIELINE" pequeno na barra de botões do card ─────── */
+.atp-dieline-btn-small {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: .75rem;
+    font-weight: 600;
+    color: var(--atp-primary, #2563eb);
+    border: 1px solid var(--atp-primary, #2563eb);
+    border-radius: var(--atp-radius, 8px);
+    text-decoration: none;
+    transition: background .15s, color .15s;
+    white-space: nowrap;
+}
+.atp-dieline-btn-small:hover {
+    background: var(--atp-primary, #2563eb);
+    color: #fff;
+}

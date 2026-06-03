@@ -1,0 +1,292 @@
+/* ================================================================
+   AllToPack — dieline.css  (full-screen layout)
+   ================================================================ */
+
+/* ── PAGE WRAPPER — reset agressivo dos estilos Odoo ──────────── */
+.atp-dieline-wrap,
+#wrap.atp-dieline-wrap {
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Altura definida via JS em fitPageHeight() */
+.atp-dl-page {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: #fff;
+}
+
+/* ── BODY: viewer + sidebar ─────────────────────────────────────── */
+.atp-dl-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ── VIEWER (left, fills remaining space) ──────────────────────── */
+.atp-dl-viewer {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    background: #ffffff;
+}
+
+/* Canvas: Three.js controla width/height via setSize — sem CSS fixo */
+.atp-dl-canvas3d {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.atp-dl-2dview {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    padding: 24px;
+}
+
+.atp-dl-2dview img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+/* Floating labels inside the viewer */
+.atp-dl-viewer-hint {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    color: #94a3b8;
+    background: rgba(255,255,255,.7);
+    padding: 3px 10px;
+    border-radius: 99px;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.atp-dl-viewer-title {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e293b;
+    background: rgba(255,255,255,.85);
+    padding: 4px 12px;
+    border-radius: 6px;
+    pointer-events: none;
+}
+
+/* ── SIDEBAR (right) ─────────────────────────────────────────────── */
+.atp-dl-sidebar {
+    width: 300px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border-left: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+/* Accordion tweaks */
+.atp-dl-sidebar .accordion-item {
+    background: transparent;
+    border-left: none;
+    border-right: none;
+}
+.atp-dl-sidebar .accordion-button {
+    background: #f8fafc;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    padding: 10px 14px;
+}
+.atp-dl-sidebar .accordion-button:not(.collapsed) {
+    background: #eff6ff;
+    color: #1d4ed8;
+    box-shadow: none;
+}
+.atp-dl-sidebar .accordion-button::after {
+    filter: none;
+}
+.atp-dl-sidebar .accordion-body {
+    padding: 10px 14px 14px;
+    background: #fff;
+}
+
+/* Dimension inputs inside accordion */
+.atp-dim-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+.atp-dim-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.atp-dim-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+}
+.atp-dim-field input[type="number"] {
+    width: 100%;
+    padding: 5px 6px;
+    font-size: 13px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #1e293b;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+.atp-dim-field input[type="number"]::-webkit-inner-spin-button,
+.atp-dim-field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+.atp-dim-field input[type="number"]:focus {
+    outline: none;
+    border-color: #2563eb;
+    background: #fff;
+}
+
+/* Card buttons */
+.atp-card-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #2563eb;
+    border-radius: 6px;
+    background: #2563eb;
+    color: #fff;
+    cursor: pointer;
+    transition: background .15s;
+    text-decoration: none;
+}
+.atp-card-btn:hover { background: #1d4ed8; color: #fff; }
+
+/* Radio / checkbox option lists */
+.atp-option-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.atp-option-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #334155;
+    cursor: pointer;
+}
+.atp-option-label input { accent-color: #2563eb; }
+
+/* Info strip below dims */
+.atp-dl-info { font-size: 11px; color: #64748b; }
+
+/* Manufacturing info rows */
+.atp-mfg-info { display: flex; flex-direction: column; gap: 8px; }
+.atp-mfg-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+    color: #334155;
+}
+.atp-mfg-row:last-child { border-bottom: none; }
+
+/* ── CONTROL BAR (bottom) ────────────────────────────────────────── */
+.atp-dl-controls {
+    flex-shrink: 0;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-top: 1px solid #e2e8f0;
+    background: #fff;
+    padding: 0 16px;
+    z-index: 20;
+}
+
+.atp-ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.atp-ctrl-sep {
+    width: 1px;
+    height: 28px;
+    background: #e2e8f0;
+    margin: 0 8px;
+}
+
+.atp-ctrl {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #fff;
+    color: #475569;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+    white-space: nowrap;
+}
+.atp-ctrl:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+}
+.atp-ctrl.active {
+    background: #2563eb;
+    color: #fff;
+    border-color: #2563eb;
+}
+.atp-ctrl.active:hover { background: #1d4ed8; }
+
+/* Animation slider */
+.atp-dl-slider {
+    width: 100px;
+    accent-color: #2563eb;
+}
+.atp-dl-pct {
+    font-size: 12px;
+    font-weight: 700;
+    color: #2563eb;
+    min-width: 34px;
+    text-align: right;
+}
+
+/* ── RESPONSIVE ──────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+    .atp-dl-sidebar { width: 240px; }
+    .atp-dl-slider  { width: 70px; }
+}
+@media (max-width: 640px) {
+    .atp-dl-body { flex-direction: column; }
+    .atp-dl-sidebar {
+        width: 100%;
+        height: 220px;
+        border-left: none;
+        border-top: 1px solid #e2e8f0;
+        overflow-x: hidden;
+    }
+    .atp-dl-page { height: auto; min-height: 100svh; }
+}
