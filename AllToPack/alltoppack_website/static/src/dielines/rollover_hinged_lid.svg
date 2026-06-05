@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 442 430">
+  <metadata>{"box_type":"rollover_hinged_lid","length":100,"width":150,"height":40}</metadata>
+
+  <!-- Rollover Hinged Lid (fiel a planificacao Packly, com cantos arredondados).
+       L=100 (frente<->tras)  W=150 (esq<->dir)  H=40 (altura).
+       Espinha: glue|front|base|back|lid|rollover. Base e o root. -->
+
+  <g id="cut_lines" stroke="#ff0000" fill="rgba(245,200,66,0.15)" stroke-width="2">
+    <rect id="base_panel" x="112" y="180" width="100" height="150" data-root="1"/>
+    <rect id="front_panel" x="72" y="180" width="40" height="150" data-fold-angle="90"/>
+    <rect id="back_panel" x="212" y="180" width="40" height="150" data-fold-angle="90"/>
+    <rect id="left_panel" x="112" y="140" width="100" height="40" data-fold-angle="90"/>
+    <rect id="right_panel" x="112" y="330" width="100" height="40" data-fold-angle="90"/>
+    <rect id="glue_panel" x="60" y="180" width="12" height="150" data-fold-angle="90"/>
+    <polygon id="lid_panel" points="252,180 334,180 337.51,180.35 340.89,181.37 344,183.03 346.73,185.27 348.97,188 350.63,191.11 351.65,194.49 352,198 352,312 351.65,315.51 350.63,318.89 348.97,322 346.73,324.73 344,326.97 340.89,328.63 337.51,329.65 334,330 252,330" data-fold-angle="90"/>
+    <polygon id="roll_panel" points="352,188 369.4,188 371.86,188.24 374.22,188.96 376.4,190.12 378.31,191.69 379.88,193.6 381.04,195.78 381.76,198.14 382,200.6 382,309.4 381.76,311.86 381.04,314.22 379.88,316.4 378.31,318.31 376.4,319.88 374.22,321.04 371.86,321.76 369.4,322 352,322" data-fold-angle="90"/>
+    <rect id="front_top_flap_panel" x="72" y="140" width="40" height="40" data-fold-angle="90"/>
+    <rect id="front_bottom_flap_panel" x="72" y="330" width="40" height="40" data-fold-angle="90"/>
+    <rect id="back_top_flap_panel" x="212" y="140" width="40" height="40" data-fold-angle="90"/>
+    <rect id="back_bottom_flap_panel" x="212" y="330" width="40" height="40" data-fold-angle="90"/>
+    <rect id="lid_top_flap_panel" x="252" y="140" width="100" height="40" data-fold-angle="90"/>
+    <rect id="lid_bottom_flap_panel" x="252" y="330" width="100" height="40" data-fold-angle="90"/>
+  </g>
+
+  <g id="fold_lines" stroke="#0000ff" fill="none" stroke-dasharray="6,4" stroke-width="1.5">
+    <line x1="72" y1="180" x2="72" y2="330"/>  <!-- glue<->front -->
+    <line x1="112" y1="180" x2="112" y2="330"/>  <!-- front<->base -->
+    <line x1="212" y1="180" x2="212" y2="330"/>  <!-- base<->back -->
+    <line x1="252" y1="180" x2="252" y2="330"/>  <!-- back<->lid -->
+    <line x1="352" y1="180" x2="352" y2="330"/>  <!-- lid<->roll -->
+    <line x1="112" y1="180" x2="212" y2="180"/>  <!-- base<->left -->
+    <line x1="112" y1="330" x2="212" y2="330"/>  <!-- base<->right -->
+    <line x1="72" y1="180" x2="112" y2="180"/>  <!-- front<->front_top -->
+    <line x1="72" y1="330" x2="112" y2="330"/>  <!-- front<->front_bottom -->
+    <line x1="212" y1="180" x2="252" y2="180"/>  <!-- back<->back_top -->
+    <line x1="212" y1="330" x2="252" y2="330"/>  <!-- back<->back_bottom -->
+    <line x1="252" y1="180" x2="352" y2="180"/>  <!-- lid<->lid_top -->
+    <line x1="252" y1="330" x2="352" y2="330"/>  <!-- lid<->lid_bottom -->
+  </g>
+</svg>

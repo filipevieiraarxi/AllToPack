@@ -16,7 +16,7 @@
         'views/shop_templates.xml',
         'views/product_templates.xml',
         'views/dieline_templates.xml',
-        # 'views/product_backend_views.xml',
+        'views/product_backend_views.xml',
         'data/product_data.xml',
     ],
     'assets': {

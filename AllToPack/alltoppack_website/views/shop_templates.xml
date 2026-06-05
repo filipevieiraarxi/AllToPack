@@ -114,8 +114,8 @@
                     <img class="atp-box-icon atp-box-icon--hover"
                          t-att-src="'/alltoppack_website/static/src/img/%s_hover.svg' % product.box_type"
                          t-att-alt="product.name"/>
-                    <img class="atp-box-icon atp-box-icon--dieline"
-                         t-att-src="'/alltoppack_website/static/src/img/%s_dieline.svg' % product.box_type"
+                    <img t-if="product.box_dieline_svg" class="atp-box-icon atp-box-icon--dieline"
+                         t-att-src="'/dieline/svg/%d' % product.id"
                          t-att-alt="product.name + ' 2D'"/>
                 </a>
             </t>

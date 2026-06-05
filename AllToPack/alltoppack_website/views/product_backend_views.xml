@@ -22,18 +22,19 @@
                                    string="Ficheiro SVG anotado"/>
                             <field name="box_dieline_svg_fname" invisible="1"/>
                             <div class="text-muted small" colspan="2">
-                                Carregue um SVG gerado pelo motor de dieline (com ids face_front,
-                                face_back, face_left, face_right, face_bottom, face_lid).
-                                As dimensões L/W/H serão lidas automaticamente do SVG.
+                                Carregue um SVG-dieline anotado: cada face é um
+                                &lt;rect id="..._panel"&gt; em #cut_lines, cada dobra
+                                é uma &lt;line&gt; em #fold_lines. Marque a base com
+                                data-root="1" e o ângulo de cada dobra com
+                                data-fold-angle. O motor 3D deriva toda a geometria
+                                deste ficheiro.
                             </div>
                         </group>
                     </group>
                     <div class="mt-2">
-                        <a class="btn btn-sm btn-outline-primary"
-                           t-attf-href="/dieline?product_id={{ object.id }}"
-                           target="_blank">
-                            <i class="fa fa-cube me-1"/> Ver Dieline 3D
-                        </a>
+                        <button name="action_open_dieline_3d" type="object"
+                                class="btn btn-sm btn-outline-primary"
+                                icon="fa-cube" string="Ver Dieline 3D"/>
                     </div>
                 </page>
             </notebook>

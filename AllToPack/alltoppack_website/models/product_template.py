@@ -5,6 +5,8 @@ from odoo import fields, models
 class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
+    # box_type é apenas um rótulo/categoria informativa do produto.
+    # NÃO determina a geometria 3D — essa é derivada do box_dieline_svg.
     box_type = fields.Selection(
         selection=[
             ('rollover_hinged_lid', 'Rollover Hinged Lid'),
@@ -17,12 +19,22 @@ class ProductTemplate(models.Model):
     box_w = fields.Float('Largura (mm)', default=80.0)
     box_h = fields.Float('Altura (mm)', default=100.0)
 
-    # SVG de dieline anotado — quando preenchido, o engine lê a geometria a partir daqui.
-    # L/W/H são inferidos do SVG; os campos box_l/w/h ficam como fallback/override.
+    # SVG-dieline anotado: é a ÚNICA fonte da geometria 3D.
+    # O engine lê painéis (<rect ..._panel>) e dobras (<line>) e infere a árvore.
     box_dieline_svg = fields.Binary(
         string='Dieline SVG',
         attachment=True,
-        help='SVG planificado com ids de face (face_front, face_back, …). '
-             'O engine 3D lê as dimensões directamente deste ficheiro.',
+        help='SVG-dieline anotado: cada face é um <rect id="..._panel"> em '
+             '#cut_lines e cada dobra uma <line> em #fold_lines. Marque a base '
+             'com data-root="1" e o ângulo de cada dobra com data-fold-angle. '
+             'O motor 3D deriva toda a geometria deste ficheiro.',
     )
     box_dieline_svg_fname = fields.Char(string='Nome do ficheiro SVG')
+
+    def action_open_dieline_3d(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_url',
+            'url': '/dieline?product_id=%d' % self.id,
+            'target': 'new',
+        }

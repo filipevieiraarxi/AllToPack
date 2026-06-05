@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 560">
+  <metadata>{"box_type":"rsc_regular_slotted","length":290,"width":200,"height":150}</metadata>
+
+  <!-- RSC Regular Slotted Container (planificacao tipo Packly).
+       Fila central = 4 paredes em sequencia ao longo de X: front, right,
+       back, left (larguras L,W,L,W; altura H). Cada parede dobra 90 sobre
+       a anterior, formando o tubo. Cada parede tem aba de topo e aba de
+       fundo (altura W/2). Glue flap (colagem) a esquerda do front.
+
+       base (root) = front. Cadeia: front -> right -> back -> left.
+       Eixo X em px = mm.  L=290  W=200  H=150 -->
+
+  <g id="cut_lines" stroke="#ff0000" fill="rgba(245,200,66,0.15)" stroke-width="2">
+    <!-- ── PAREDES (fila central, y: 180..330, altura H=150) ── -->
+    <rect id="front_panel" x="60"  y="180" width="290" height="150" data-root="1"/>
+    <rect id="right_panel" x="350" y="180" width="200" height="150" data-fold-angle="90"/>
+    <rect id="back_panel"  x="550" y="180" width="290" height="150" data-fold-angle="90"/>
+    <rect id="left_panel"  x="840" y="180" width="200" height="150" data-fold-angle="90"/>
+
+    <!-- ── ABAS DE TOPO (y: 80..180, altura W/2=100) ── -->
+    <rect id="front_top_panel" x="60"  y="80" width="290" height="100" data-fold-angle="90"/>
+    <rect id="right_top_panel" x="350" y="80" width="200" height="100" data-fold-angle="90"/>
+    <rect id="back_top_panel"  x="550" y="80" width="290" height="100" data-fold-angle="90"/>
+    <rect id="left_top_panel"  x="840" y="80" width="200" height="100" data-fold-angle="90"/>
+
+    <!-- ── ABAS DE FUNDO (y: 330..430, altura W/2=100) ── -->
+    <rect id="front_bottom_panel" x="60"  y="330" width="290" height="100" data-fold-angle="90"/>
+    <rect id="right_bottom_panel" x="350" y="330" width="200" height="100" data-fold-angle="90"/>
+    <rect id="back_bottom_panel"  x="550" y="330" width="290" height="100" data-fold-angle="90"/>
+    <rect id="left_bottom_panel"  x="840" y="330" width="200" height="100" data-fold-angle="90"/>
+
+    <!-- ── GLUE FLAP (colagem, a esquerda do front, largura 30) ── -->
+    <rect id="glue_panel" x="30" y="180" width="30" height="150" data-fold-angle="90"/>
+  </g>
+
+  <g id="fold_lines" stroke="#0000ff" fill="none" stroke-dasharray="6,4" stroke-width="1.5">
+    <!-- paredes em cadeia (arestas verticais entre paineis adjacentes) -->
+    <line x1="350" y1="180" x2="350" y2="330"/>  <!-- front <-> right -->
+    <line x1="550" y1="180" x2="550" y2="330"/>  <!-- right <-> back  -->
+    <line x1="840" y1="180" x2="840" y2="330"/>  <!-- back  <-> left  -->
+    <!-- glue flap -->
+    <line x1="60"  y1="180" x2="60"  y2="330"/>  <!-- front <-> glue  -->
+
+    <!-- abas de topo (aresta horizontal y=180, topo de cada parede) -->
+    <line x1="60"  y1="180" x2="350" y2="180"/>  <!-- front <-> front_top -->
+    <line x1="350" y1="180" x2="550" y2="180"/>  <!-- right <-> right_top -->
+    <line x1="550" y1="180" x2="840" y2="180"/>  <!-- back  <-> back_top  -->
+    <line x1="840" y1="180" x2="1040" y2="180"/> <!-- left  <-> left_top  -->
+
+    <!-- abas de fundo (aresta horizontal y=330, fundo de cada parede) -->
+    <line x1="60"  y1="330" x2="350" y2="330"/>  <!-- front <-> front_bottom -->
+    <line x1="350" y1="330" x2="550" y2="330"/>  <!-- right <-> right_bottom -->
+    <line x1="550" y1="330" x2="840" y2="330"/>  <!-- back  <-> back_bottom  -->
+    <line x1="840" y1="330" x2="1040" y2="330"/> <!-- left  <-> left_bottom  -->
+  </g>
+</svg>
