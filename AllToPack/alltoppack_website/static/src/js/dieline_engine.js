@@ -35,6 +35,10 @@
 
     /* árvore de dobras montada: lista de { node, pivot, foldSign, axis } */
     var folds = [];
+    var svgTextCache = null;
+    var artwork = {};        /* { face_key: data_url } — estado local do artwork */
+    var selectedFace = null; /* face_key seleccionada pelo raycasting */
+    var meshMap = {};        /* { face_key: mesh } para aplicar texturas */
     /* centro/escala da cena (mm) para câmara e eixos */
     var sceneSize = 300;
     var sceneCenter = { x: 0, y: 0, z: 0 };
@@ -74,22 +78,32 @@
         boxGroup.rotation.y = Math.PI; // girar a caixa 180° em torno do eixo vertical
         scene.add(boxGroup);
 
+        /* Caixas sem lid ficam na vertical (plano XY — eixos vermelho e verde).
+           Caixas com lid ficam na horizontal (plano XZ — comportamento padrao). */
+        var verticalBase = (_cfg.boxType || '').indexOf('lid') === -1;
+
         var u = geo.unit || 1;
         function mm(px) { return px / u; }
-        /* Ancorar a caixa junto aos eixos: bbox do root → canto em (0,0). */
+        /* Ancorar a caixa junto aos eixos: bbox do root -> canto em (0,0). */
         var rootNode = geo.nodes[0];
         var rb = polyBBox(rootNode.points);
-        var off = { x: rb.minX, y: rb.minY };       /* subtrair p/ 1º octante */
+        var off = { x: rb.minX, y: rb.minY };
         var baseL = mm(rb.w), baseW = mm(rb.h);
 
-        /* Após giro Y=180°, o boxGroup fica em x/z negativos; trazê-lo de volta.
-           Isso faz o ponto de fechamento do box ficar em 0,0 do sistema de eixos. */
-        boxGroup.position.set(baseL, 0, baseW);
+        if (verticalBase) {
+            /* Modo vertical: base no plano XY. rotation.y=PI inverte X, nao Y. */
+            boxGroup.position.set(baseL, 0, 0);
+        } else {
+            /* Modo horizontal: base no plano XZ. */
+            boxGroup.position.set(baseL, 0, baseW);
+        }
 
-        /* ponto SVG → vetor de cena no chão (Y=0), já deslocado p/ 1º octante.
-           TODOS os painéis (root e filhos) usam o mesmo off, p/ ficarem no
-           mesmo referencial. */
-        function sceneOf(p) { return new THREE.Vector3(mm(p.x - off.x), 0, mm(p.y - off.y)); }
+        /* Modo vertical: (x,y) -> (x, y, 0) — base no plano XY (eixos vermelho e verde).
+           Modo horizontal: (x,y) -> (x, 0, y) — base no plano XZ (comportamento padrao). */
+        function sceneOf(p) {
+            if (verticalBase) return new THREE.Vector3(mm(p.x - off.x), mm(p.y - off.y), 0);
+            return new THREE.Vector3(mm(p.x - off.x), 0, mm(p.y - off.y));
+        }
 
         var maxH = 0;
         geo.nodes.forEach(function (n) {
@@ -98,7 +112,11 @@
             }
         });
         sceneSize = Math.max(baseL, baseW, maxH, 50);
-        sceneCenter = { x: baseL * 1.5, y: maxH / 2, z: baseW * 1.5 };
+        if (verticalBase) {
+            sceneCenter = { x: baseL / 2, y: baseW / 2, z: maxH / 2 };
+        } else {
+            sceneCenter = { x: baseL / 2, y: maxH / 2, z: baseW / 2 };
+        }
 
         var groups = {};
         folds = [];
@@ -113,20 +131,16 @@
                       : node.angle >= 135 ? COL_LID : COL_WALL;
 
             if (node.parentKey == null) {
-                /* ROOT deitado no chão: shape (x,y,0)→cena (x,0,y) via +90° X.
-                   restWorld do root = essa rotação (sem translação). */
-                var mesh = polyMesh(node.points, off, mm, color);
-                mesh.rotation.x = Math.PI / 2;
-                mesh.name = node.key;
+                var mesh = polyMesh(node.points, off, mm, color, node.key);
+                if (!verticalBase) {
+                    mesh.rotation.x = Math.PI / 2;
+                }
                 boxGroup.add(mesh);
-                /* Os filhos do root penduram no boxGroup (identidade). A
-                   rotação π/2 do mesh é só para desenhar a base; NÃO entra
-                   no referencial dos filhos. Logo rootRest = identidade. */
                 groups[node.key] = { attach: boxGroup, restWorld: new THREE.Matrix4() };
                 return;
             }
 
-            groups[node.key] = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color);
+            groups[node.key] = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color, verticalBase);
         });
 
         updateFolds(animT);
@@ -145,17 +159,21 @@
        parentAttach:    foldGroup do pai (onde pendurar).
        parentRestWorld: matriz mundial-de-repouso do pai.
        Devolve { attach, restWorld } para os filhos deste nó. */
-    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color) {
+    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color, verticalBase) {
         var e = node.edge;
         var A = sceneOf({ x: e.x1, y: e.y1 });
         var B = sceneOf({ x: e.x2, y: e.y2 });
 
-        /* û = direção da aresta no chão; n̂ = perpendicular no chão, p/ dentro */
+        /* û = direção da aresta no plano base; n̂ = perpendicular no plano base, p/ dentro.
+           Modo horizontal (plano XZ): outAxis = Y -> nHat = cross(Y, uHat) = (-uHat.z, 0, uHat.x).
+           Modo vertical  (plano XY): outAxis = Z -> nHat = cross(Z, uHat) = (-uHat.y, uHat.x, 0). */
         var uHat = B.clone().sub(A);
         var edgeLen = uHat.length() || 1;
         uHat.multiplyScalar(1 / edgeLen);
-        var nHat = new THREE.Vector3(-uHat.z, 0, uHat.x);
-        var cen = polyCentroidScene(node.points, off, mm);
+        var nHat = verticalBase
+            ? new THREE.Vector3(-uHat.y, uHat.x, 0)
+            : new THREE.Vector3(-uHat.z, 0, uHat.x);
+        var cen = polyCentroidScene(node.points, sceneOf);
         if (cen.clone().sub(A).dot(nHat) < 0) nHat.multiplyScalar(-1);
 
         /* restWorld do FILHO (no chão): mapeia o SHAPE (s,d,0) → mundo.
@@ -186,8 +204,7 @@
             var rel = P.clone().sub(A);
             return new THREE.Vector2(rel.dot(uHat), rel.dot(nHat));
         });
-        var mesh = shapeMesh(pts2d, color);
-        mesh.name = node.key;
+        var mesh = shapeMesh(pts2d, color, node.key);
         foldGroup.add(mesh);
 
         folds.push({ pivot: foldGroup, angle: node.angle, sign: -1 });
@@ -208,26 +225,49 @@
 
     /* ── GEOMETRIA DE POLÍGONOS ──────────────────────────────────── */
 
+    function makeMatSide(color, side) {
+        return new THREE.MeshLambertMaterial({
+            color: color, side: side, transparent: true, opacity: 0.95,
+        });
+    }
+
+    /* Cria um Group com dois meshes — _outer (FrontSide) e _inner (BackSide).
+       Ambos são registados no meshMap com os sufixos correspondentes.
+       Devolve o Group para adicionar ao pai. */
+    function makeFacePair(geo, color, key) {
+        var outer = new THREE.Mesh(geo, makeMatSide(color, THREE.FrontSide));
+        var inner = new THREE.Mesh(geo, makeMatSide(color, THREE.BackSide));
+        outer.name = key + '_outer';
+        inner.name = key + '_inner';
+        meshMap[key + '_outer'] = outer;
+        meshMap[key + '_inner'] = inner;
+        var grp = new THREE.Group();
+        grp.name = key;
+        grp.add(outer);
+        grp.add(inner);
+        return grp;
+    }
+
     /* Mesh do ROOT: shape a partir dos pontos SVG (deslocados por off,
        escalados para mm). Fica no plano XY local (depois rodado p/ XZ). */
-    function polyMesh(points, off, mm, color) {
+    function polyMesh(points, off, mm, color, key) {
         var shape = new THREE.Shape();
         points.forEach(function (p, i) {
             var x = mm(p.x - off.x), y = mm(p.y - off.y);
             if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
         });
         shape.closePath();
-        return new THREE.Mesh(new THREE.ShapeGeometry(shape), makeMat(color));
+        return makeFacePair(new THREE.ShapeGeometry(shape), color, key);
     }
 
     /* Mesh de um painel-filho a partir de pontos 2D (s,d) já em mm. */
-    function shapeMesh(pts2d, color) {
+    function shapeMesh(pts2d, color, key) {
         var shape = new THREE.Shape();
         pts2d.forEach(function (p, i) {
             if (i === 0) shape.moveTo(p.x, p.y); else shape.lineTo(p.x, p.y);
         });
         shape.closePath();
-        return new THREE.Mesh(new THREE.ShapeGeometry(shape), makeMat(color));
+        return makeFacePair(new THREE.ShapeGeometry(shape), color, key);
     }
 
     function polyBBox(points) {
@@ -239,12 +279,12 @@
         return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, w: maxX - minX, h: maxY - minY };
     }
 
-    /* centroide do polígono em coords de CENA (chão, Y=0) */
-    function polyCentroidScene(points, off, mm) {
+    /* centroide do polígono em coords de CENA, usando sceneOf para o mapeamento correto */
+    function polyCentroidScene(points, sceneOf) {
         var sx = 0, sy = 0;
         points.forEach(function (p) { sx += p.x; sy += p.y; });
         var n = points.length || 1;
-        return new THREE.Vector3(mm(sx / n - off.x), 0, mm(sy / n - off.y));
+        return sceneOf({ x: sx / n, y: sy / n });
     }
 
     /* "profundidade" do painel = distância máx. dos seus pontos à aresta
@@ -275,6 +315,9 @@
     function clearScene() {
         if (boxGroup) { scene.remove(boxGroup); boxGroup = null; }
         folds = [];
+        meshMap = {};
+        selectedFace = null;
+        updateArtworkPanel(null);
     }
 
     /* ── AXES ───────────────────────────────────────────────────── */
@@ -428,8 +471,148 @@
         if (icon) icon.className = 'fa fa-play';
     }
 
+    /* ── ARTWORK ────────────────────────────────────────────────── */
+
+    function applyArtworkToFace(faceKey, dataUrl) {
+        var mesh = meshMap[faceKey];
+        if (!mesh) return;
+        var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
+        var tex = new THREE.TextureLoader().load(dataUrl);
+        tex.flipY = false;
+        mesh.material = new THREE.MeshLambertMaterial({
+            map: tex, side: side, transparent: true, opacity: 0.95,
+        });
+        artwork[faceKey] = dataUrl;
+    }
+
+    function removeArtworkFromFace(faceKey) {
+        var mesh = meshMap[faceKey];
+        if (!mesh) return;
+        var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
+        mesh.material = makeMatSide(COL_WALL, side);
+        delete artwork[faceKey];
+    }
+
+    /* Painel lateral que aparece quando uma face está seleccionada */
+    function updateArtworkPanel(faceKey) {
+        var panel = document.getElementById('atp-artwork-panel');
+        var label = document.getElementById('atp-artwork-face-label');
+        var preview = document.getElementById('atp-artwork-preview');
+        var btnRemove = document.getElementById('atp-artwork-remove');
+        if (!panel) return;
+        if (!faceKey) {
+            panel.style.display = 'none';
+            return;
+        }
+        panel.style.display = '';
+        if (label) label.textContent = faceKey.replace(/_outer$/, ' (outer)').replace(/_inner$/, ' (inner)').replace(/_/g, ' ');
+        if (preview) {
+            if (artwork[faceKey]) {
+                preview.src = artwork[faceKey];
+                preview.style.display = 'block';
+            } else {
+                preview.src = '';
+                preview.style.display = 'none';
+            }
+        }
+        if (btnRemove) btnRemove.style.display = artwork[faceKey] ? '' : 'none';
+    }
+
+    /* Raycasting — hover highlight + clique selecciona face */
+    function initRaycasting() {
+        var raycaster = new THREE.Raycaster();
+        var mouse = new THREE.Vector2();
+        var clickStart = { x: 0, y: 0 };
+        var hoveredMesh = null;
+
+        function setEmissive(mesh, hex) {
+            if (mesh && mesh.material && mesh.material.emissive) {
+                mesh.material.emissive.setHex(hex);
+            }
+        }
+
+        c3.addEventListener('mousemove', function (e) {
+            var rect = c3.getBoundingClientRect();
+            mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+            mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            var meshes = Object.values(meshMap);
+            var hits = raycaster.intersectObjects(meshes, false);
+            var hit = hits.length ? hits[0].object : null;
+            if (hit !== hoveredMesh) {
+                setEmissive(hoveredMesh, 0x000000);
+                hoveredMesh = hit;
+                setEmissive(hoveredMesh, 0x888888);
+                c3.style.cursor = hit ? 'pointer' : 'default';
+            }
+        });
+
+        c3.addEventListener('mouseleave', function () {
+            setEmissive(hoveredMesh, 0x000000);
+            hoveredMesh = null;
+            c3.style.cursor = 'default';
+        });
+
+        c3.addEventListener('mousedown', function (e) {
+            clickStart.x = e.clientX; clickStart.y = e.clientY;
+        });
+
+        c3.addEventListener('mouseup', function (e) {
+            if (Math.abs(e.clientX - clickStart.x) > 4 || Math.abs(e.clientY - clickStart.y) > 4) return;
+            var rect = c3.getBoundingClientRect();
+            mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+            mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            var meshes = Object.values(meshMap);
+            var hits = raycaster.intersectObjects(meshes, false);
+            if (hits.length) {
+                selectedFace = hits[0].object.name;
+                updateArtworkPanel(selectedFace);
+                /* Abrir o accordion de artwork automaticamente */
+                var acc = document.getElementById('acc-upload');
+                if (acc && !acc.classList.contains('show')) {
+                    var btn = document.querySelector('[data-bs-target="#acc-upload"]');
+                    if (btn) btn.click();
+                }
+            } else {
+                selectedFace = null;
+                updateArtworkPanel(null);
+            }
+        });
+    }
+
+    /* Carregar artwork guardado do backend */
+    function loadArtwork(productId) {
+        if (!productId) return;
+        fetch('/dieline/artwork/load?product_id=' + productId)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                artwork = data || {};
+                Object.keys(artwork).forEach(function (k) { applyArtworkToFace(k, artwork[k]); });
+            })
+            .catch(function () {});
+    }
+
+    /* Guardar artwork no backend */
+    function saveArtwork(productId) {
+        if (!productId) return;
+        fetch('/dieline/artwork/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: { product_id: productId, artwork: artwork } }),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+            var ok = res.result && res.result.ok;
+            var msg = document.getElementById('atp-artwork-save-msg');
+            if (msg) { msg.textContent = ok ? 'Guardado!' : 'Erro ao guardar'; msg.style.display = ''; setTimeout(function () { msg.style.display = 'none'; }, 2000); }
+        })
+        .catch(function () {});
+    }
+
     /* ── WIRING ─────────────────────────────────────────────────── */
     function wire(id, fn) { var el = document.getElementById(id); if (el) el.addEventListener('click', fn); }
+
     wire('ctrl-3d', function () { setView('3d'); });
     wire('ctrl-2d', function () { setView('2d'); });
     wire('ctrl-anim', function () { animPlaying ? stopAnim() : startAnim(); });
@@ -451,11 +634,140 @@
 
     window.addEventListener('resize', function () { fitPageHeight(); resizeRenderer(); updateCam(); });
 
+
+    /* ── GERADORES SVG PARAMETRICOS ─────────────────────────────── */
+    var _generators = (function () {
+        function r2(n) { return Math.round(n * 100) / 100; }
+        function rect(id, x, y, w, h, extra) {
+            return '<rect id="' + id + '_panel" x="' + r2(x) + '" y="' + r2(y) + '" width="' + r2(w) + '" height="' + r2(h) + '" ' + (extra || '') + '/>';
+        }
+        function polygon(id, pts, extra) {
+            var s = pts.map(function (p) { return r2(p.x) + ',' + r2(p.y); }).join(' ');
+            return '<polygon id="' + id + '" points="' + s + '" ' + (extra || '') + '/>';
+        }
+        function fline(x1, y1, x2, y2) {
+            return '<line x1="' + r2(x1) + '" y1="' + r2(y1) + '" x2="' + r2(x2) + '" y2="' + r2(y2) + '"/>';
+        }
+        function roundedRightEdge(x, y, w, h, r) {
+            r = Math.min(r, h / 2, w / 2);
+            var pts = [{ x: x, y: y }, { x: x + w - r, y: y }];
+            for (var i = 1; i <= 3; i++) {
+                var a = -Math.PI / 2 + (Math.PI / 2) * (i / 3);
+                pts.push({ x: x + w - r + r * Math.cos(a), y: y + r + r * Math.sin(a) });
+            }
+            for (var j = 0; j <= 3; j++) {
+                var b = (Math.PI / 2) * (j / 3);
+                pts.push({ x: x + w - r + r * Math.cos(b), y: y + h - r + r * Math.sin(b) });
+            }
+            pts.push({ x: x + w - r, y: y + h }, { x: x, y: y + h });
+            return pts;
+        }
+        function buildSvg(vw, vh, boxType, L, W, H, cutLines, foldLines) {
+            var nl = '\n';
+            return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + r2(vw) + ' ' + r2(vh) + '">' + nl +
+                '  <metadata>' + JSON.stringify({ box_type: boxType, length: L, width: W, height: H }) + '</metadata>' + nl +
+                '  <g id="cut_lines" stroke="#ff0000" fill="rgba(245,200,66,0.15)" stroke-width="2">' + nl +
+                cutLines.join(nl) + nl +
+                '  </g>' + nl +
+                '  <g id="fold_lines" stroke="#0000ff" fill="none" stroke-dasharray="6,4" stroke-width="1.5">' + nl +
+                foldLines.join(nl) + nl +
+                '  </g>' + nl +
+                '</svg>';
+        }
+        function rsc(L, W, H) {
+            var G = 30, T = W / 2, mx = 20, my = 20;
+            var x0 = mx + G, x1 = x0 + L, x2 = x1 + W, x3 = x2 + L, x4 = x3 + W;
+            var yTop = my, yWall = my + T, yBot = my + T + H;
+            var cuts = [
+                rect('front_panel',        x0, yWall, L, H, 'data-root="1"'),
+                rect('right_panel',        x1, yWall, W, H, 'data-fold-angle="90"'),
+                rect('back_panel',         x2, yWall, L, H, 'data-fold-angle="90"'),
+                rect('left_panel',         x3, yWall, W, H, 'data-fold-angle="90"'),
+                rect('front_top_panel',    x0, yTop,  L, T, 'data-fold-angle="90"'),
+                rect('right_top_panel',    x1, yTop,  W, T, 'data-fold-angle="90"'),
+                rect('back_top_panel',     x2, yTop,  L, T, 'data-fold-angle="90"'),
+                rect('left_top_panel',     x3, yTop,  W, T, 'data-fold-angle="90"'),
+                rect('front_bottom_panel', x0, yBot,  L, T, 'data-fold-angle="90"'),
+                rect('right_bottom_panel', x1, yBot,  W, T, 'data-fold-angle="90"'),
+                rect('back_bottom_panel',  x2, yBot,  L, T, 'data-fold-angle="90"'),
+                rect('left_bottom_panel',  x3, yBot,  W, T, 'data-fold-angle="90"'),
+                rect('glue_panel',         mx, yWall, G, H, 'data-fold-angle="90"'),
+            ];
+            var folds = [
+                fline(x0, yWall, x0, yBot), fline(x1, yWall, x1, yBot),
+                fline(x2, yWall, x2, yBot), fline(x3, yWall, x3, yBot),
+                fline(x0, yWall, x1, yWall), fline(x1, yWall, x2, yWall),
+                fline(x2, yWall, x3, yWall), fline(x3, yWall, x4, yWall),
+                fline(x0, yBot,  x1, yBot),  fline(x1, yBot,  x2, yBot),
+                fline(x2, yBot,  x3, yBot),  fline(x3, yBot,  x4, yBot),
+            ];
+            return buildSvg(x4 + mx, yBot + T + my, 'rsc_regular_slotted', L, W, H, cuts, folds);
+        }
+        function rolloverHingedLid(L, W, H) {
+            var G = Math.max(10, Math.round(H * 0.3));
+            var ROLL = Math.max(8, Math.round(H * 0.45));
+            var FLAP = H, r = Math.min(10, Math.round(H * 0.2));
+            var mx = 20, my = 20;
+            var xGlue = mx, xFront = xGlue + G, xBase = xFront + H;
+            var xBack = xBase + L, xLid = xBack + H, xRoll = xLid + L, xEnd = xRoll + ROLL;
+            var yTop = my, yWall = my + FLAP, yBot = my + FLAP + W;
+            var cuts = [
+                rect('base_panel',              xBase,  yWall, L,    W,    'data-root="1"'),
+                rect('front_panel',             xFront, yWall, H,    W,    'data-fold-angle="90"'),
+                rect('back_panel',              xBack,  yWall, H,    W,    'data-fold-angle="90"'),
+                rect('left_panel',              xBase,  yTop,  L,    FLAP, 'data-fold-angle="90"'),
+                rect('right_panel',             xBase,  yBot,  L,    FLAP, 'data-fold-angle="90"'),
+                rect('glue_panel',              xGlue,  yWall, G,    W,    'data-fold-angle="90"'),
+                polygon('lid_panel',            roundedRightEdge(xLid, yWall, L, W, r), 'data-fold-angle="90"'),
+                polygon('roll_panel',           roundedRightEdge(xRoll, yWall + r, ROLL, W - 2 * r, r * 0.5), 'data-fold-angle="90"'),
+                rect('front_top_flap_panel',    xFront, yTop,  H,    FLAP, 'data-fold-angle="90"'),
+                rect('front_bottom_flap_panel', xFront, yBot,  H,    FLAP, 'data-fold-angle="90"'),
+                rect('back_top_flap_panel',     xBack,  yTop,  H,    FLAP, 'data-fold-angle="90"'),
+                rect('back_bottom_flap_panel',  xBack,  yBot,  H,    FLAP, 'data-fold-angle="90"'),
+                rect('lid_top_flap_panel',      xLid,   yTop,  L,    FLAP, 'data-fold-angle="90"'),
+                rect('lid_bottom_flap_panel',   xLid,   yBot,  L,    FLAP, 'data-fold-angle="90"'),
+            ];
+            var folds = [
+                fline(xFront, yWall, xFront, yBot), fline(xBase, yWall, xBase, yBot),
+                fline(xBack,  yWall, xBack,  yBot), fline(xLid,  yWall, xLid,  yBot),
+                fline(xRoll,  yWall, xRoll,  yBot),
+                fline(xBase, yWall, xBack, yWall), fline(xBase, yBot, xBack, yBot),
+                fline(xFront, yWall, xBase, yWall), fline(xFront, yBot, xBase, yBot),
+                fline(xBack, yWall, xLid, yWall),  fline(xBack, yBot, xLid, yBot),
+                fline(xLid, yWall, xRoll, yWall),  fline(xLid, yBot, xRoll, yBot),
+            ];
+            return buildSvg(xEnd + mx, yBot + FLAP + my, 'rollover_hinged_lid', L, W, H, cuts, folds);
+        }
+        return {
+            generate: function (boxType, L, W, H) {
+                if (boxType === 'rsc_regular_slotted') return rsc(L, W, H);
+                if (boxType === 'rollover_hinged_lid')  return rolloverHingedLid(L, W, H);
+                return null;
+            },
+        };
+    }());
+
     /* API mínima exposta (debug / testes headless) */
     window.ATP_DIELINE = {
         get scene() { return scene; },
         get folds() { return folds; },
         setFold: function (t) { animT = t; updateFolds(t); },
+        rebuild: function (L, W, H) {
+            var svgText = null;
+            /* Tentar gerar SVG parametrico para o tipo de caixa actual. */
+            if (_cfg.boxType) {
+                svgText = _generators.generate(_cfg.boxType, L, W, H);
+            }
+            /* Fallback: re-parsear o SVG original se nao houver gerador. */
+            if (!svgText) svgText = svgTextCache;
+            if (!svgText) return;
+            var geo = DielineParser.build(svgText);
+            if (!geo.nodes || !geo.nodes.length) return;
+            stopAnim(); animT = 0; animDir = 1; updateSlider(0);
+            buildFromGeometry(geo);
+            sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5);
+            updateCam();
+        },
     };
 
     /* ── BOOT ───────────────────────────────────────────────────── */
@@ -463,16 +775,64 @@
         if (typeof THREE === 'undefined') { console.error('Three.js não carregado'); return; }
         initThree();
 
+        var btnApply = document.getElementById('btnApply');
+        if (btnApply) {
+            btnApply.addEventListener('click', function () {
+                var L = parseFloat(document.getElementById('iL').value) || 0;
+                var W = parseFloat(document.getElementById('iW').value) || 0;
+                var H = parseFloat(document.getElementById('iH').value) || 0;
+                window.ATP_DIELINE.rebuild(L, W, H);
+            });
+        }
+
+        /* Artwork: upload de imagem para a face seleccionada */
+        var fileArtwork = document.getElementById('fileArtwork');
+        if (fileArtwork) {
+            fileArtwork.addEventListener('change', function () {
+                if (!selectedFace || !this.files[0]) return;
+                var reader = new FileReader();
+                reader.onload = function (e) {
+                    applyArtworkToFace(selectedFace, e.target.result);
+                    updateArtworkPanel(selectedFace);
+                    var name = document.getElementById('artworkName');
+                    if (name) name.textContent = fileArtwork.files[0].name;
+                };
+                reader.readAsDataURL(this.files[0]);
+            });
+        }
+
+        var btnRemove = document.getElementById('atp-artwork-remove');
+        if (btnRemove) {
+            btnRemove.addEventListener('click', function () {
+                if (!selectedFace) return;
+                removeArtworkFromFace(selectedFace);
+                updateArtworkPanel(selectedFace);
+            });
+        }
+
+        var btnSaveArtwork = document.getElementById('atp-artwork-save');
+        if (btnSaveArtwork) {
+            btnSaveArtwork.addEventListener('click', function () {
+                saveArtwork(_cfg.productId);
+            });
+        }
+
+        initRaycasting();
+
         var url = _cfg.dielineSvgUrl;
         if (!url) { showEmpty('Este produto não tem dieline SVG.'); return; }
         if (typeof DielineParser === 'undefined') { console.error('DielineParser não carregado'); return; }
 
-        DielineParser.parse(url)
-            .then(function (geo) {
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+            .then(function (text) {
+                svgTextCache = text;
+                var geo = DielineParser.build(text);
                 if (!geo.nodes || !geo.nodes.length) { showEmpty('Dieline sem painéis válidos.'); return; }
                 buildFromGeometry(geo);
                 sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5);
                 updateCam();
+                loadArtwork(_cfg.productId);
             })
             .catch(function (err) {
                 console.error('[dieline] falha a carregar SVG:', err.message);

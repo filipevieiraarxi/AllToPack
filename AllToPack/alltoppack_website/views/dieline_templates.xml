@@ -239,20 +239,40 @@
                                         <button class="accordion-button collapsed" type="button"
                                                 data-bs-toggle="collapse" data-bs-target="#acc-upload"
                                                 aria-expanded="false" aria-controls="acc-upload">
-                                            <i class="fa fa-upload me-2 text-primary"/>File Upload &amp; 3D Mockup
+                                            <i class="fa fa-upload me-2 text-primary"/>Artwork / 3D Mockup
                                         </button>
                                     </h2>
                                     <div id="acc-upload" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
                                         <div class="accordion-body">
                                             <p class="small text-muted mb-2">
-                                                Upload your artwork to preview on the 3D model.
-                                                Supports PNG, JPG, PDF.
+                                                Click a face on the 3D model to select it, then upload an image.
                                             </p>
-                                            <label class="atp-card-btn w-100 text-center" for="fileArtwork" style="cursor:pointer">
-                                                <i class="fa fa-folder-open me-1"/>Choose file…
-                                            </label>
-                                            <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
-                                            <span id="artworkName" class="small text-muted d-block mt-1">No file selected</span>
+
+                                            <!-- Painel que aparece quando uma face está seleccionada -->
+                                            <div id="atp-artwork-panel" style="display:none" class="mb-2">
+                                                <div class="d-flex align-items-center justify-content-between mb-1">
+                                                    <strong class="small">Face: <span id="atp-artwork-face-label"/></strong>
+                                                    <button id="atp-artwork-remove" class="btn btn-sm btn-outline-danger py-0" style="display:none">
+                                                        <i class="fa fa-trash"/>
+                                                    </button>
+                                                </div>
+                                                <img id="atp-artwork-preview" alt="preview"
+                                                     style="display:none;width:100%;border-radius:4px;margin-bottom:6px"/>
+                                                <label class="atp-card-btn w-100 text-center" for="fileArtwork" style="cursor:pointer">
+                                                    <i class="fa fa-folder-open me-1"/>Choose image…
+                                                </label>
+                                                <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
+                                                <span id="artworkName" class="small text-muted d-block mt-1"/>
+                                            </div>
+
+                                            <div class="small text-muted mb-2" id="atp-artwork-hint">
+                                                Click a face on the 3D model to start.
+                                            </div>
+
+                                            <button id="atp-artwork-save" class="atp-card-btn w-100 mt-1">
+                                                <i class="fa fa-save me-1"/>Save Artwork
+                                            </button>
+                                            <span id="atp-artwork-save-msg" class="small text-success d-block mt-1" style="display:none!important"/>
                                         </div>
                                     </div>
                                 </div>
@@ -291,11 +311,35 @@
 
                             </div><!-- /accordion -->
 
-                            <!-- Request quote -->
+                            <!-- Price + Add to Cart -->
                             <div class="p-3">
-                                <a href="/contactus" class="btn btn-primary w-100">
-                                    <i class="fa fa-envelope me-1"/>Request a Quote
-                                </a>
+                                <t t-if="product and product_variant_id">
+                                    <div class="atp-cart-block">
+                                        <div class="atp-cart-price">
+                                            <span class="atp-cart-label">Unit price</span>
+                                            <span class="atp-cart-amount">
+                                                <t t-esc="'€ {:,.2f}'.format(product_price)"/>
+                                            </span>
+                                        </div>
+                                        <form action="/shop/cart/update" method="post" class="mt-2">
+                                            <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
+                                            <input type="hidden" name="product_id" t-att-value="product_variant_id"/>
+                                            <div class="atp-cart-qty mb-2">
+                                                <label class="atp-cart-label">Quantity</label>
+                                                <input type="number" name="add_qty" value="1" min="1"
+                                                       class="form-control form-control-sm atp-qty-input"/>
+                                            </div>
+                                            <button type="submit" class="btn atp-btn-addcart w-100">
+                                                <i class="fa fa-shopping-cart me-2"/>Add to Cart
+                                            </button>
+                                        </form>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <a href="/contactus" class="btn btn-primary w-100">
+                                        <i class="fa fa-envelope me-1"/>Request a Quote
+                                    </a>
+                                </t>
                             </div>
 
                         </div><!-- /sidebar -->
@@ -353,15 +397,19 @@
                     L: <t t-esc="box_l"/>,
                     W: <t t-esc="box_w"/>,
                     H: <t t-esc="box_h"/>,
-                    dielineSvgUrl: '<t t-esc="dieline_svg_url"/>'
+                    dielineSvgUrl: '<t t-esc="dieline_svg_url"/>',
+                    productId: <t t-esc="product.id if product else 0"/>,
+                    productVariantId: <t t-esc="product_variant_id"/>,
+                    productPrice: <t t-esc="product_price"/>
                 };
             </script>
 
             <t t-set="options" t-value="{'defer_scripts': False}"/>
             <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"/>
-            <!-- Parser deve ser carregado antes do engine -->
-            <script src="/alltoppack_website/static/src/js/dieline_parser.js"/>
-            <script src="/alltoppack_website/static/src/js/dieline_engine.js"/>
+            <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
+            <!-- Parser e geradores devem ser carregados antes do engine -->
+            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=2"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=3"/>
 
         </t>
     </template>

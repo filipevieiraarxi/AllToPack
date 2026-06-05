@@ -30,6 +30,8 @@ class ProductTemplate(models.Model):
              'O motor 3D deriva toda a geometria deste ficheiro.',
     )
     box_dieline_svg_fname = fields.Char(string='Nome do ficheiro SVG')
+    box_artwork = fields.Text(string='Artwork JSON', default='{}',
+        help='JSON dict {face_key: base64_data_url} com as imagens aplicadas a cada face.')
 
     def action_open_dieline_3d(self):
         self.ensure_one()
