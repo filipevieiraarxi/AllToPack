@@ -13,6 +13,7 @@
     'data': [
         'security/ir.model.access.csv',
         'views/templates.xml',
+        'views/packaging_templates.xml',
         'views/shop_templates.xml',
         'views/product_templates.xml',
         'views/dieline_templates.xml',
@@ -26,6 +27,7 @@
             'alltoppack_website/static/src/js/main.js',
         ],
     },
+    'post_init_hook': 'post_init_hook',
     'installable': True,
     'application': True,
     'auto_install': False,

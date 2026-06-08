@@ -37,308 +37,244 @@
                             </t>
                         </div>
 
-                        <!-- RIGHT SIDEBAR — accordion cards -->
+                        <!-- RIGHT SIDEBAR — collapsible cards -->
                         <div class="atp-dl-sidebar">
-                            <div class="accordion accordion-flush" id="atp-accord">
 
-                                <!-- 1. Internal Dimensions -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-dims"
-                                                aria-expanded="true" aria-controls="acc-dims">
-                                            <i class="fa fa-arrows-alt me-2 text-primary"/>Internal Dimensions
-                                        </button>
-                                    </h2>
-                                    <div id="acc-dims" class="accordion-collapse collapse show" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-dim-grid">
-                                                <div class="atp-dim-field">
-                                                    <label>L (mm)</label>
-                                                    <input type="number" id="iL" t-att-value="box_l" min="40" max="600"/>
-                                                </div>
-                                                <div class="atp-dim-field">
-                                                    <label>W (mm)</label>
-                                                    <input type="number" id="iW" t-att-value="box_w" min="30" max="600"/>
-                                                </div>
-                                                <div class="atp-dim-field">
-                                                    <label>H (mm)</label>
-                                                    <input type="number" id="iH" t-att-value="box_h" min="30" max="600"/>
-                                                </div>
-                                            </div>
-                                            <button id="btnApply" class="atp-card-btn mt-2 w-100">
-                                                <i class="fa fa-check me-1"/>Apply Dimensions
-                                            </button>
-                                            <div class="atp-dl-info mt-2">
-                                                <span id="infoBlank" class="small text-muted"/>
-                                            </div>
+                            <!-- CARD: Dimensions (open by default) -->
+                            <div class="atp-scard atp-scard--open">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-arrows-alt"/>
+                                    <span>Dimensions</span>
+                                    <i class="fa fa-chevron-up atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body">
+                                    <div class="atp-dim-grid">
+                                        <div class="atp-dim-field">
+                                            <label>Length</label>
+                                            <input type="number" id="iL" t-att-value="box_l" min="40" max="600"/>
+                                            <span class="atp-dim-unit">mm</span>
+                                        </div>
+                                        <div class="atp-dim-field">
+                                            <label>Width</label>
+                                            <input type="number" id="iW" t-att-value="box_w" min="30" max="600"/>
+                                            <span class="atp-dim-unit">mm</span>
+                                        </div>
+                                        <div class="atp-dim-field">
+                                            <label>Height</label>
+                                            <input type="number" id="iH" t-att-value="box_h" min="30" max="600"/>
+                                            <span class="atp-dim-unit">mm</span>
                                         </div>
                                     </div>
+                                    <button id="btnApply" class="atp-scard-btn mt-3 w-100">
+                                        <i class="fa fa-refresh me-1"/>Update 3D
+                                    </button>
+                                    <span id="infoBlank" class="atp-scard-info mt-1"/>
                                 </div>
+                            </div>
 
-                                <!-- 2. Material -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-material"
-                                                aria-expanded="false" aria-controls="acc-material">
-                                            <i class="fa fa-cube me-2 text-primary"/>Material
-                                        </button>
-                                    </h2>
-                                    <div id="acc-material" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-option-group">
-                                                <label class="atp-option-label">
-                                                    <input type="radio" name="material" value="e_flute" checked="True"/>
-                                                    E-Flute (1.5mm)
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="radio" name="material" value="b_flute"/>
-                                                    B-Flute (3mm)
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="radio" name="material" value="bc_flute"/>
-                                                    BC-Flute (6mm)
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="radio" name="material" value="solid"/>
-                                                    Solid Board (0.5mm)
-                                                </label>
-                                            </div>
-                                            <p class="small text-muted mt-2 mb-0">
-                                                <i class="fa fa-info-circle me-1"/>Grammage: 300–450 g/m²
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 3. Windows and Cutouts -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-windows"
-                                                aria-expanded="false" aria-controls="acc-windows">
-                                            <i class="fa fa-th-large me-2 text-primary"/>Windows and Cutouts
-                                        </button>
-                                    </h2>
-                                    <div id="acc-windows" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-option-group">
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="window" value="front"/>
-                                                    Front window
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="window" value="top"/>
-                                                    Top window
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="window" value="side"/>
-                                                    Side window
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="window" value="handle"/>
-                                                    Handle cutout
-                                                </label>
-                                            </div>
-                                            <p class="small text-muted mt-2 mb-0">Window dimensions configured at production stage.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 4. Special Finishes -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-finishes"
-                                                aria-expanded="false" aria-controls="acc-finishes">
-                                            <i class="fa fa-star me-2 text-primary"/>Special Finishes
-                                        </button>
-                                    </h2>
-                                    <div id="acc-finishes" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-option-group">
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="finish" value="gloss_laminate"/>
-                                                    Gloss laminate
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="finish" value="matte_laminate"/>
-                                                    Matte laminate
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="finish" value="spot_uv"/>
-                                                    Spot UV
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="finish" value="embossing"/>
-                                                    Embossing / Debossing
-                                                </label>
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="finish" value="hot_foil"/>
-                                                    Hot foil stamping
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 5. Quantity and Design Variants -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-qty"
-                                                aria-expanded="false" aria-controls="acc-qty">
-                                            <i class="fa fa-sliders me-2 text-primary"/>Quantity and Design Variants
-                                        </button>
-                                    </h2>
-                                    <div id="acc-qty" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-dim-field mb-2">
-                                                <label>Quantity (units)</label>
-                                                <input type="number" value="500" min="100" step="100"/>
-                                            </div>
-                                            <div class="atp-dim-field mb-2">
-                                                <label>Design variants</label>
-                                                <input type="number" value="1" min="1" max="10"/>
-                                            </div>
-                                            <div class="atp-option-group">
-                                                <label class="atp-option-label">
-                                                    <input type="checkbox" name="variant" value="print_both"/>
-                                                    Print both sides
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 6. Dieline Template -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-dieline"
-                                                aria-expanded="false" aria-controls="acc-dieline">
-                                            <i class="fa fa-file-image-o me-2 text-primary"/>Dieline Template
-                                        </button>
-                                    </h2>
-                                    <div id="acc-dieline" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <p class="small text-muted mb-2">
-                                                Download the dieline as an editable SVG with current dimensions.
-                                            </p>
-                                            <button id="btnDownloadSVG" class="atp-card-btn w-100">
-                                                <i class="fa fa-download me-1"/>Download SVG
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 7. File Upload and 3D Mockup -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-upload"
-                                                aria-expanded="false" aria-controls="acc-upload">
-                                            <i class="fa fa-upload me-2 text-primary"/>Artwork / 3D Mockup
-                                        </button>
-                                    </h2>
-                                    <div id="acc-upload" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <p class="small text-muted mb-2">
-                                                Click a face on the 3D model to select it, then upload an image.
-                                            </p>
-
-                                            <!-- Painel que aparece quando uma face está seleccionada -->
-                                            <div id="atp-artwork-panel" style="display:none" class="mb-2">
-                                                <div class="d-flex align-items-center justify-content-between mb-1">
-                                                    <strong class="small">Face: <span id="atp-artwork-face-label"/></strong>
-                                                    <button id="atp-artwork-remove" class="btn btn-sm btn-outline-danger py-0" style="display:none">
-                                                        <i class="fa fa-trash"/>
-                                                    </button>
-                                                </div>
-                                                <img id="atp-artwork-preview" alt="preview"
-                                                     style="display:none;width:100%;border-radius:4px;margin-bottom:6px"/>
-                                                <label class="atp-card-btn w-100 text-center" for="fileArtwork" style="cursor:pointer">
-                                                    <i class="fa fa-folder-open me-1"/>Choose image…
-                                                </label>
-                                                <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
-                                                <span id="artworkName" class="small text-muted d-block mt-1"/>
-                                            </div>
-
-                                            <div class="small text-muted mb-2" id="atp-artwork-hint">
-                                                Click a face on the 3D model to start.
-                                            </div>
-
-                                            <button id="atp-artwork-save" class="atp-card-btn w-100 mt-1">
-                                                <i class="fa fa-save me-1"/>Save Artwork
-                                            </button>
-                                            <span id="atp-artwork-save-msg" class="small text-success d-block mt-1" style="display:none!important"/>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- 8. Manufacturing Time -->
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header">
-                                        <button class="accordion-button collapsed" type="button"
-                                                data-bs-toggle="collapse" data-bs-target="#acc-mfg"
-                                                aria-expanded="false" aria-controls="acc-mfg">
-                                            <i class="fa fa-clock-o me-2 text-primary"/>Manufacturing Time
-                                        </button>
-                                    </h2>
-                                    <div id="acc-mfg" class="accordion-collapse collapse" data-bs-parent="#atp-accord">
-                                        <div class="accordion-body">
-                                            <div class="atp-mfg-info">
-                                                <div class="atp-mfg-row">
-                                                    <span>Standard production</span>
-                                                    <strong>10–14 business days</strong>
-                                                </div>
-                                                <div class="atp-mfg-row">
-                                                    <span>Express production</span>
-                                                    <strong>5–7 business days</strong>
-                                                </div>
-                                                <div class="atp-mfg-row">
-                                                    <span>Shipping (EU)</span>
-                                                    <strong>2–3 business days</strong>
-                                                </div>
-                                            </div>
-                                            <p class="small text-muted mt-2 mb-0">
-                                                Times are estimates and may vary based on quantity and finishes.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                            </div><!-- /accordion -->
-
-                            <!-- Price + Add to Cart -->
-                            <div class="p-3">
-                                <t t-if="product and product_variant_id">
-                                    <div class="atp-cart-block">
-                                        <div class="atp-cart-price">
-                                            <span class="atp-cart-label">Unit price</span>
-                                            <span class="atp-cart-amount">
-                                                <t t-esc="'€ {:,.2f}'.format(product_price)"/>
+                            <!-- CARD: Material -->
+                            <div class="atp-scard">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-cube"/>
+                                    <span>Material</span>
+                                    <i class="fa fa-chevron-down atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body" style="display:none">
+                                    <div class="atp-radio-grid">
+                                        <label class="atp-radio-tile">
+                                            <input type="radio" name="material" value="e_flute" checked="True"/>
+                                            <span class="atp-radio-tile-inner">
+                                                <strong>E-Flute</strong>
+                                                <small>1.5 mm</small>
                                             </span>
+                                        </label>
+                                        <label class="atp-radio-tile">
+                                            <input type="radio" name="material" value="b_flute"/>
+                                            <span class="atp-radio-tile-inner">
+                                                <strong>B-Flute</strong>
+                                                <small>3 mm</small>
+                                            </span>
+                                        </label>
+                                        <label class="atp-radio-tile">
+                                            <input type="radio" name="material" value="bc_flute"/>
+                                            <span class="atp-radio-tile-inner">
+                                                <strong>BC-Flute</strong>
+                                                <small>6 mm</small>
+                                            </span>
+                                        </label>
+                                        <label class="atp-radio-tile">
+                                            <input type="radio" name="material" value="solid"/>
+                                            <span class="atp-radio-tile-inner">
+                                                <strong>Solid Board</strong>
+                                                <small>0.5 mm</small>
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CARD: Quantity -->
+                            <div class="atp-scard">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-cubes"/>
+                                    <span>Quantity and design variants</span>
+                                    <span class="atp-scard-summary" id="qty-summary">500 pcs · 1 variant</span>
+                                    <i class="fa fa-chevron-down atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body" style="display:none">
+                                    <!-- Input row -->
+                                    <div class="atp-qty-input-row">
+                                        <div class="atp-qty-field">
+                                            <span class="atp-qty-range">min 1 → max 1 Mil</span>
+                                            <div class="atp-qty-box">
+                                                <input id="acc-qty-input" type="number" value="500" min="1" step="1" class="atp-qty-main-input"/>
+                                                <span class="atp-qty-pcs">pcs</span>
+                                            </div>
                                         </div>
-                                        <form action="/shop/cart/update" method="post" class="mt-2">
+                                        <div class="atp-qty-field atp-qty-field--grow">
+                                            <span class="atp-qty-range">Design variants</span>
+                                            <div class="atp-qty-box">
+                                                <input id="acc-variants-input" type="number" value="1" min="1" max="10" class="atp-qty-main-input"/>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Price tiers -->
+                                    <div class="atp-tier-row" id="atp-tier-row">
+                                        <button type="button" class="atp-tier" data-qty="1"><span class="atp-tier-qty">1</span><span class="atp-tier-price">€23.49</span></button>
+                                        <button type="button" class="atp-tier atp-tier--active" data-qty="100"><span class="atp-tier-qty">100</span><span class="atp-tier-price">€2.01</span></button>
+                                        <button type="button" class="atp-tier" data-qty="500"><span class="atp-tier-qty">500</span><span class="atp-tier-price">€1.20</span></button>
+                                        <button type="button" class="atp-tier" data-qty="1000"><span class="atp-tier-qty">1,000</span><span class="atp-tier-price">€0.56</span></button>
+                                        <button type="button" class="atp-tier" data-qty="5000"><span class="atp-tier-qty">5,000</span><span class="atp-tier-price">€0.35</span></button>
+                                        <t t-if="not request.env.user._is_public()">
+                                            <button type="button" class="atp-tier" data-qty="25000"><span class="atp-tier-qty">25,000</span><span class="atp-tier-price">€0.17</span></button>
+                                        </t>
+                                        <t t-else="">
+                                            <a href="/web/login" class="atp-tier atp-tier--locked" title="Login to unlock this price">
+                                                <span class="atp-tier-qty">25,000</span>
+                                                <span class="atp-tier-price atp-tier-price--blur">€0.17</span>
+                                                <i class="fa fa-lock atp-tier-lock"/>
+                                            </a>
+                                        </t>
+                                    </div>
+                                    <label class="atp-check-row mt-2">
+                                        <input type="checkbox" name="variant" value="print_both"/>
+                                        <span>Print both sides</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- CARD: Finishes -->
+                            <div class="atp-scard">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-magic"/>
+                                    <span>Special Finishes</span>
+                                    <i class="fa fa-chevron-down atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body" style="display:none">
+                                    <label class="atp-check-row"><input type="checkbox" name="finish" value="gloss_laminate"/><span>Gloss laminate</span></label>
+                                    <label class="atp-check-row"><input type="checkbox" name="finish" value="matte_laminate"/><span>Matte laminate</span></label>
+                                    <label class="atp-check-row"><input type="checkbox" name="finish" value="spot_uv"/><span>Spot UV</span></label>
+                                    <label class="atp-check-row"><input type="checkbox" name="finish" value="embossing"/><span>Embossing / Debossing</span></label>
+                                    <label class="atp-check-row"><input type="checkbox" name="finish" value="hot_foil"/><span>Hot foil stamping</span></label>
+                                </div>
+                            </div>
+
+                            <!-- CARD: Artwork -->
+                            <div class="atp-scard" id="acc-upload">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-paint-brush"/>
+                                    <span>Artwork / 3D Mockup</span>
+                                    <i class="fa fa-chevron-down atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body" style="display:none">
+                                    <div id="atp-artwork-panel" style="display:none">
+                                        <div class="atp-artwork-face-row">
+                                            <i class="fa fa-square-o"/>
+                                            <strong id="atp-artwork-face-label"/>
+                                            <button id="atp-artwork-remove" class="atp-artwork-remove-btn" style="display:none" title="Remove">
+                                                <i class="fa fa-trash"/>
+                                            </button>
+                                        </div>
+                                        <img id="atp-artwork-preview" alt="preview"
+                                             style="display:none;width:100%;border-radius:6px;margin:8px 0"/>
+                                        <label class="atp-scard-btn w-100 text-center mb-1" for="fileArtwork">
+                                            <i class="fa fa-folder-open me-1"/>Choose image…
+                                        </label>
+                                        <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
+                                        <span id="artworkName" class="atp-scard-info"/>
+                                    </div>
+                                    <div id="atp-artwork-hint" class="atp-scard-hint">
+                                        <i class="fa fa-mouse-pointer me-1"/>Click a face on the 3D model to start.
+                                    </div>
+                                    <button id="atp-artwork-save" class="atp-scard-btn w-100 mt-2">
+                                        <i class="fa fa-save me-1"/>Save Artwork
+                                    </button>
+                                    <span id="atp-artwork-save-msg" class="atp-scard-info text-success mt-1" style="display:none!important"/>
+                                </div>
+                            </div>
+
+                            <!-- CARD: Delivery -->
+                            <div class="atp-scard">
+                                <button type="button" class="atp-scard-header" data-atp-toggle="1">
+                                    <i class="fa fa-truck"/>
+                                    <span>Manufacturing time</span>
+                                    <i class="fa fa-chevron-down atp-scard-chevron"/>
+                                </button>
+                                <div class="atp-scard-body" style="display:none">
+                                    <div class="atp-delivery-cols">
+                                        <div class="atp-delivery-option atp-delivery-option--active">
+                                            <i class="fa fa-truck atp-delivery-icon"/>
+                                            <span class="atp-delivery-label">Standard</span>
+                                            <span class="atp-delivery-date">~14 June</span>
+                                        </div>
+                                        <div class="atp-delivery-option">
+                                            <i class="fa fa-bolt atp-delivery-icon"/>
+                                            <span class="atp-delivery-label">Fast</span>
+                                            <span class="atp-delivery-date">~11 June</span>
+                                        </div>
+                                        <div class="atp-delivery-option">
+                                            <i class="fa fa-rocket atp-delivery-icon"/>
+                                            <span class="atp-delivery-label">Special</span>
+                                            <span class="atp-delivery-date">~8 June</span>
+                                        </div>
+                                    </div>
+                                    <div class="atp-delivery-shipping">
+                                        <i class="fa fa-globe me-2"/>
+                                        Free shipping in 29 EU Countries
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- CARD: Order (always visible, no toggle) -->
+                            <div class="atp-scard atp-scard--order">
+                                <t t-if="product and product_variant_id">
+                                    <div class="atp-scard-body">
+                                        <div class="atp-order-price">
+                                            <div class="atp-order-total" id="atp-order-total">
+                                                <t t-esc="'€{:,.2f}'.format(product_price * 500)"/>
+                                            </div>
+                                            <div class="atp-order-unit" id="atp-order-unit">
+                                                <t t-esc="'€{:.4f}'.format(product_price)"/>
+                                                <span class="atp-order-unit-sep"> × </span>
+                                                <span id="atp-order-qty-label">500 pcs</span>
+                                            </div>
+                                        </div>
+                                        <form action="/shop/cart/update" method="post">
                                             <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
                                             <input type="hidden" name="product_id" t-att-value="product_variant_id"/>
-                                            <div class="atp-cart-qty mb-2">
-                                                <label class="atp-cart-label">Quantity</label>
-                                                <input type="number" name="add_qty" value="1" min="1"
-                                                       class="form-control form-control-sm atp-qty-input"/>
-                                            </div>
-                                            <button type="submit" class="btn atp-btn-addcart w-100">
-                                                <i class="fa fa-shopping-cart me-2"/>Add to Cart
+                                            <input type="hidden" name="add_qty" id="cart-qty-input" value="500"/>
+                                            <button type="submit" class="atp-btn-addcart w-100">
+                                                <i class="fa fa-shopping-cart me-2"/>Add to cart
                                             </button>
                                         </form>
                                     </div>
                                 </t>
                                 <t t-else="">
-                                    <a href="/contactus" class="btn btn-primary w-100">
-                                        <i class="fa fa-envelope me-1"/>Request a Quote
-                                    </a>
+                                    <div class="atp-scard-body">
+                                        <a href="/contactus" class="atp-btn-addcart w-100" style="text-decoration:none">
+                                            <i class="fa fa-envelope me-2"/>Request a Quote
+                                        </a>
+                                    </div>
                                 </t>
                             </div>
 
@@ -410,6 +346,89 @@
             <!-- Parser e geradores devem ser carregados antes do engine -->
             <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=2"/>
             <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=3"/>
+
+            <script>
+                (function () {
+                    function syncQty() {
+                        var src = document.getElementById('acc-qty-input');
+                        var dst = document.getElementById('cart-qty-input');
+                        if (src &amp;&amp; dst) dst.value = src.value;
+                    }
+                    document.addEventListener('DOMContentLoaded', function () {
+                        syncQty();
+                        var src = document.getElementById('acc-qty-input');
+                        if (src) src.addEventListener('input', syncQty);
+
+                        /* Card toggle */
+                        document.querySelectorAll('[data-atp-toggle]').forEach(function (btn) {
+                            btn.addEventListener('click', function () {
+                                var card = btn.closest('.atp-scard');
+                                var body = card.querySelector('.atp-scard-body');
+                                var chevron = btn.querySelector('.atp-scard-chevron');
+                                var open = card.classList.toggle('atp-scard--open');
+                                body.style.display = open ? '' : 'none';
+                                if (chevron) chevron.className = 'fa atp-scard-chevron fa-chevron-' + (open ? 'up' : 'down');
+                            });
+                        });
+
+                        /* Quantity summary updater */
+                        function updateQtySummary() {
+                            var qtyEl = document.getElementById('acc-qty-input');
+                            var varEl = document.getElementById('acc-variants-input');
+                            var sumEl = document.getElementById('qty-summary');
+                            if (!sumEl) return;
+                            var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 0) : 0;
+                            var vrn = varEl ? (parseInt(varEl.value, 10) || 1) : 1;
+                            sumEl.textContent = qty.toLocaleString() + ' pcs · ' + vrn + ' variant' + (vrn !== 1 ? 's' : '');
+                        }
+                        var qtyIn = document.getElementById('acc-qty-input');
+                        var varIn = document.getElementById('acc-variants-input');
+                        if (qtyIn) qtyIn.addEventListener('input', updateQtySummary);
+                        if (varIn) varIn.addEventListener('input', updateQtySummary);
+                        updateQtySummary();
+
+                        /* Price tier click → set qty input + highlight */
+                        document.querySelectorAll('.atp-tier').forEach(function (btn) {
+                            btn.addEventListener('click', function () {
+                                document.querySelectorAll('.atp-tier').forEach(function (b) { b.classList.remove('atp-tier--active'); });
+                                btn.classList.add('atp-tier--active');
+                                var qty = parseInt(btn.dataset.qty, 10);
+                                var input = document.getElementById('acc-qty-input');
+                                if (input) { input.value = qty; input.dispatchEvent(new Event('input')); }
+                            });
+                        });
+
+                        /* Delivery option click → highlight */
+                        document.querySelectorAll('.atp-delivery-option').forEach(function (opt) {
+                            opt.addEventListener('click', function () {
+                                document.querySelectorAll('.atp-delivery-option').forEach(function (o) { o.classList.remove('atp-delivery-option--active'); });
+                                opt.classList.add('atp-delivery-option--active');
+                            });
+                        });
+
+                        /* Order price updater — total e unit price reactivos à qty */
+                        var _unitPrice = <t t-esc="product_price if product_price else 0"/>;
+                        function updateOrderPrice() {
+                            var qtyEl = document.getElementById('acc-qty-input');
+                            var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 0) : 0;
+                            var totalEl = document.getElementById('atp-order-total');
+                            var unitEl  = document.getElementById('atp-order-unit');
+                            if (totalEl) {
+                                var t = (_unitPrice * qty);
+                                totalEl.textContent = '€' + t.toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            }
+                            if (unitEl) {
+                                unitEl.innerHTML = '€' + _unitPrice.toFixed(4) +
+                                    '<span class="atp-order-unit-sep"> × </span>' +
+                                    qty.toLocaleString() + ' pcs';
+                            }
+                        }
+                        var qtyForPrice = document.getElementById('acc-qty-input');
+                        if (qtyForPrice) qtyForPrice.addEventListener('input', updateOrderPrice);
+                        updateOrderPrice();
+                    });
+                })();
+            </script>
 
         </t>
     </template>

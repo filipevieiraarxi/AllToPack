@@ -6,6 +6,32 @@ from odoo import http
 from odoo.http import request
 
 
+class PackagingController(http.Controller):
+
+    _CATEG_DEFS = [
+        ('Caixas',    'fa-archive',      'Caixas personalizadas de cartão, configuráveis em 3D.'),
+        ('Sacos',     'fa-shopping-bag', 'Sacos de papel e plástico para todo o tipo de produto.'),
+        ('Etiquetas', 'fa-tag',          'Etiquetas adesivas personalizadas para marcas e produtos.'),
+        ('Outros',    'fa-th-large',     'Outros produtos de embalagem e merchandising.'),
+    ]
+
+    @http.route('/packaging', type='http', auth='public', website=True)
+    def packaging_index(self, **kwargs):
+        names = [d[0] for d in self._CATEG_DEFS]
+        # 1 query para todas as categorias em vez de 4 separadas
+        recs = request.env['product.public.category'].sudo().search([('name', 'in', names)])
+        by_name = {r.name: r for r in recs}
+        ih = request.env['ir.http']
+
+        categories = []
+        for name, icon, desc in self._CATEG_DEFS:
+            rec = by_name.get(name)
+            url = ('/shop/category/%s' % ih._slug(rec)) if rec else '/shop'
+            categories.append({'name': name, 'icon': icon, 'description': desc, 'url': url})
+
+        return request.render('alltoppack_website.packaging_index', {'categories': categories})
+
+
 class DielineController(http.Controller):
 
     @http.route('/dieline', type='http', auth='public', website=True)

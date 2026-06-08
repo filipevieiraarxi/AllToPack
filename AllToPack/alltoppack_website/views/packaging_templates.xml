@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <template id="packaging_index" name="AllToPack — Packaging Categories">
+        <t t-call="website.layout">
+            <div id="wrap" class="atp-packaging-page">
+
+                <!-- HERO -->
+                <section class="atp-pkg-hero">
+                    <div class="container text-center">
+                        <h1 class="atp-pkg-hero__title">O que procura?</h1>
+                        <p class="atp-pkg-hero__sub">
+                            Escolha a categoria de embalagem e configure o seu produto.
+                        </p>
+                    </div>
+                </section>
+
+                <!-- CATEGORY CARDS -->
+                <section class="atp-pkg-grid-section">
+                    <div class="container">
+                        <div class="atp-pkg-grid">
+                            <t t-foreach="categories" t-as="cat">
+                                <a t-att-href="cat['url']" class="atp-pkg-card">
+                                    <div class="atp-pkg-card__icon">
+                                        <i t-att-class="'fa fa-2x ' + cat['icon']"/>
+                                    </div>
+                                    <div class="atp-pkg-card__body">
+                                        <h3 class="atp-pkg-card__name">
+                                            <t t-esc="cat['name']"/>
+                                        </h3>
+                                        <p class="atp-pkg-card__desc">
+                                            <t t-esc="cat['description']"/>
+                                        </p>
+                                    </div>
+                                    <div class="atp-pkg-card__arrow">
+                                        <i class="fa fa-arrow-right"/>
+                                    </div>
+                                </a>
+                            </t>
+                        </div>
+                    </div>
+                </section>
+
+            </div>
+        </t>
+    </template>
+
+</odoo>

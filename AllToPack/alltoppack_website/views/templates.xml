@@ -15,7 +15,7 @@
                         <p class="atp-hero__subtitle">
                             Soluções completas em embalagem para o seu negócio.
                         </p>
-                        <a href="/shop" class="btn atp-btn-primary atp-btn-primary--lg mt-3">
+                        <a href="/packaging" class="btn atp-btn-primary atp-btn-primary--lg mt-3">
                             Ver Produtos
                         </a>
                     </div>
@@ -67,7 +67,7 @@
                     <div class="container">
                         <h2 class="atp-section-title text-center mb-4">Produtos em Destaque</h2>
                         <div class="text-center mt-4">
-                            <a href="/shop" class="btn atp-btn-secondary">
+                            <a href="/packaging" class="btn atp-btn-secondary">
                                 Ver todos os produtos
                             </a>
                         </div>

@@ -30,8 +30,10 @@
     if (img2d && _cfg.dielineSvgUrl) img2d.src = _cfg.dielineSvgUrl;
 
     /* Three */
-    var scene, camera, renderer, boxGroup, axesHelper;
-    var sph = { theta: 0.9, phi: 1.0, r: ZOOM_DEFAULT };
+    var scene, camera, renderer, boxPivot, boxGroup, axesHelper;
+    var sph = { r: ZOOM_DEFAULT };
+    /* Rotação livre sem gimbal lock: quaternion acumulado no boxPivot (inicializado em initThree) */
+    var rotQuat = null;
 
     /* árvore de dobras montada: lista de { node, pivot, foldSign, axis } */
     var folds = [];
@@ -74,34 +76,31 @@
        ════════════════════════════════════════════════════════════ */
     function buildFromGeometry(geo) {
         clearScene();
-        boxGroup = new THREE.Group();
-        boxGroup.rotation.y = Math.PI; // girar a caixa 180° em torno do eixo vertical
-        scene.add(boxGroup);
 
-        /* Caixas sem lid ficam na vertical (plano XY — eixos vermelho e verde).
-           Caixas com lid ficam na horizontal (plano XZ — comportamento padrao). */
-        var verticalBase = (_cfg.boxType || '').indexOf('lid') === -1;
+        /* boxPivot: fica na ORIGEM, só recebe a rotação do utilizador.
+           boxGroup: filho do pivot, deslocado para que o centro geométrico
+           da caixa coincida com a origem — assim a rotação é sobre si próprio. */
+        boxPivot = new THREE.Group();
+        boxGroup = new THREE.Group();
+        boxPivot.add(boxGroup);
+        scene.add(boxPivot);
+
+        /* Rotação inicial: nenhuma — caixa de frente para a câmara */
+        if (rotQuat) {
+            rotQuat.set(0, 0, 0, 1);
+            boxPivot.quaternion.copy(rotQuat);
+        }
 
         var u = geo.unit || 1;
         function mm(px) { return px / u; }
-        /* Ancorar a caixa junto aos eixos: bbox do root -> canto em (0,0). */
         var rootNode = geo.nodes[0];
         var rb = polyBBox(rootNode.points);
         var off = { x: rb.minX, y: rb.minY };
         var baseL = mm(rb.w), baseW = mm(rb.h);
 
-        if (verticalBase) {
-            /* Modo vertical: base no plano XY. rotation.y=PI inverte X, nao Y. */
-            boxGroup.position.set(baseL, 0, 0);
-        } else {
-            /* Modo horizontal: base no plano XZ. */
-            boxGroup.position.set(baseL, 0, baseW);
-        }
-
-        /* Modo vertical: (x,y) -> (x, y, 0) — base no plano XY (eixos vermelho e verde).
-           Modo horizontal: (x,y) -> (x, 0, y) — base no plano XZ (comportamento padrao). */
+        /* SVG (x,y) → cena (X=x, Y=0, Z=y): base no plano XZ (deitada).
+           boxGroup é rodado -90° em X para levantar a caixa para a vertical. */
         function sceneOf(p) {
-            if (verticalBase) return new THREE.Vector3(mm(p.x - off.x), mm(p.y - off.y), 0);
             return new THREE.Vector3(mm(p.x - off.x), 0, mm(p.y - off.y));
         }
 
@@ -112,11 +111,13 @@
             }
         });
         sceneSize = Math.max(baseL, baseW, maxH, 50);
-        if (verticalBase) {
-            sceneCenter = { x: baseL / 2, y: baseW / 2, z: maxH / 2 };
-        } else {
-            sceneCenter = { x: baseL / 2, y: maxH / 2, z: baseW / 2 };
-        }
+
+        /* Levantar a caixa: rodar boxGroup -90° em X → base no plano XY, paredes em Z/Y.
+           Após esta rotação: X=L, Y=W(profundidade), Z=H(altura visual).
+           Centro geométrico: (-L/2, -W/2, -H/2) antes da rotação → centrado na origem. */
+        boxGroup.rotation.x = -Math.PI / 2;
+        boxGroup.position.set(-baseL / 2, -baseW / 2, maxH / 2);
+        sceneCenter = { x: 0, y: 0, z: 0 };
 
         var groups = {};
         folds = [];
@@ -132,20 +133,21 @@
 
             if (node.parentKey == null) {
                 var mesh = polyMesh(node.points, off, mm, color, node.key);
-                if (!verticalBase) {
-                    mesh.rotation.x = Math.PI / 2;
-                }
+                mesh.rotation.x = Math.PI / 2;
                 boxGroup.add(mesh);
                 groups[node.key] = { attach: boxGroup, restWorld: new THREE.Matrix4() };
                 return;
             }
 
-            groups[node.key] = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color, verticalBase);
+            groups[node.key] = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color);
         });
 
         updateFolds(animT);
         buildAxes();
         updateInfo(geo);
+        /* Recalcular tamanho do canvas após construção — sidebar pode ter mudado */
+        resizeRenderer();
+        updateCam();
     }
 
     /* Constrói o pivot+foldGroup de um filho na aresta de dobra.
@@ -159,20 +161,16 @@
        parentAttach:    foldGroup do pai (onde pendurar).
        parentRestWorld: matriz mundial-de-repouso do pai.
        Devolve { attach, restWorld } para os filhos deste nó. */
-    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color, verticalBase) {
+    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color) {
         var e = node.edge;
         var A = sceneOf({ x: e.x1, y: e.y1 });
         var B = sceneOf({ x: e.x2, y: e.y2 });
 
-        /* û = direção da aresta no plano base; n̂ = perpendicular no plano base, p/ dentro.
-           Modo horizontal (plano XZ): outAxis = Y -> nHat = cross(Y, uHat) = (-uHat.z, 0, uHat.x).
-           Modo vertical  (plano XY): outAxis = Z -> nHat = cross(Z, uHat) = (-uHat.y, uHat.x, 0). */
+        /* û = direção da aresta no plano XZ; n̂ = perpendicular no plano XZ, p/ dentro. */
         var uHat = B.clone().sub(A);
         var edgeLen = uHat.length() || 1;
         uHat.multiplyScalar(1 / edgeLen);
-        var nHat = verticalBase
-            ? new THREE.Vector3(-uHat.y, uHat.x, 0)
-            : new THREE.Vector3(-uHat.z, 0, uHat.x);
+        var nHat = new THREE.Vector3(-uHat.z, 0, uHat.x);
         var cen = polyCentroidScene(node.points, sceneOf);
         if (cen.clone().sub(A).dot(nHat) < 0) nHat.multiplyScalar(-1);
 
@@ -313,7 +311,8 @@
     }
 
     function clearScene() {
-        if (boxGroup) { scene.remove(boxGroup); boxGroup = null; }
+        if (boxPivot) { scene.remove(boxPivot); boxPivot = null; }
+        boxGroup = null;
         folds = [];
         meshMap = {};
         selectedFace = null;
@@ -323,32 +322,28 @@
     /* ── AXES ───────────────────────────────────────────────────── */
     function buildAxes() {
         if (axesHelper) { scene.remove(axesHelper); axesHelper = null; }
-        var maxD = sceneSize;
-        var len = maxD * 1.4, rad = maxD * 0.008;
-        var grp = new THREE.Group();
-        function axis(dir, color) {
-            var m  = new THREE.MeshBasicMaterial({ color: color });
-            var sh = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, len, 8), m);
-            var tp = new THREE.Mesh(new THREE.ConeGeometry(rad * 2.5, rad * 7, 8), m);
-            tp.position.y = len / 2 + rad * 3.5; sh.add(tp);
-            if (dir === 'x') { sh.rotation.z = -Math.PI / 2; sh.position.x = len / 2; }
-            if (dir === 'y') { sh.position.y = len / 2; }
-            if (dir === 'z') { sh.rotation.x =  Math.PI / 2; sh.position.z = len / 2; }
-            grp.add(sh);
-        }
-        axis('x', 0xff3333); axis('y', 0x33cc33); axis('z', 0x3399ff);
-        axesHelper = grp; scene.add(grp);
+        /* eixos removidos — não têm utilidade para o utilizador final */
     }
 
     /* ── INFO / SLIDER ──────────────────────────────────────────── */
     function updateInfo(geo) {
         var el = document.getElementById('infoBlank');
         if (!el) return;
-        var m = (geo && geo.meta) || {};
-        if (m.length && m.width && m.height) {
-            el.textContent = 'L=' + Math.round(m.length) + ' × W=' + Math.round(m.width) + ' × H=' + Math.round(m.height) + ' mm';
+        /* Mostrar sempre os valores dos inputs — são os que o utilizador
+           vê e usa para o rebuild. Os metadados do SVG externo podem ter
+           unidades ou mapeamentos diferentes. */
+        var iL = document.getElementById('iL');
+        var iW = document.getElementById('iW');
+        var iH = document.getElementById('iH');
+        if (iL && iW && iH && iL.value && iW.value && iH.value) {
+            el.textContent = 'L=' + Math.round(iL.value) + ' × W=' + Math.round(iW.value) + ' × H=' + Math.round(iH.value) + ' mm';
         } else {
-            el.textContent = (geo ? geo.nodes.length + ' painéis' : '');
+            var m = (geo && geo.meta) || {};
+            if (m.length && m.width && m.height) {
+                el.textContent = 'L=' + Math.round(m.length) + ' × W=' + Math.round(m.width) + ' × H=' + Math.round(m.height) + ' mm';
+            } else {
+                el.textContent = (geo ? geo.nodes.length + ' panels' : '');
+            }
         }
     }
     function updateSlider(pct) {
@@ -364,13 +359,8 @@
 
     /* ── CAMERA ─────────────────────────────────────────────────── */
     function updateCam() {
-        var c = sceneCenter;
-        camera.position.set(
-            c.x + sph.r * Math.sin(sph.phi) * Math.sin(sph.theta),
-            c.y + sph.r * Math.cos(sph.phi),
-            c.z + sph.r * Math.sin(sph.phi) * Math.cos(sph.theta)
-        );
-        camera.lookAt(c.x, c.y, c.z);
+        camera.position.set(0, 0, sph.r);
+        camera.lookAt(0, 0, 0);
     }
 
     /* ── LAYOUT ─────────────────────────────────────────────────── */
@@ -422,15 +412,24 @@
         var d1 = new THREE.DirectionalLight(0xffffff, 0.7); d1.position.set(300, 500, 300); scene.add(d1);
         var d2 = new THREE.DirectionalLight(0x88aaff, 0.3); d2.position.set(-250, 150, -200); scene.add(d2);
 
-        /* orbit */
+        /* inicializar quaternion de rotação */
+        rotQuat = new THREE.Quaternion();
+
+        /* rotação livre por quaternion — sem gimbal lock */
         var drag = false, prev = { x: 0, y: 0 };
         c3.addEventListener('mousedown', function (e) { drag = true; prev = { x: e.clientX, y: e.clientY }; });
         window.addEventListener('mouseup', function () { drag = false; });
         window.addEventListener('mousemove', function (e) {
             if (!drag) return;
-            sph.theta -= (e.clientX - prev.x) * 0.007;
-            sph.phi = Math.max(0.05, Math.min(Math.PI - 0.05, sph.phi + (e.clientY - prev.y) * 0.007));
-            prev = { x: e.clientX, y: e.clientY }; updateCam();
+            var dx = (e.clientX - prev.x) * 0.007;
+            var dy = (e.clientY - prev.y) * 0.007;
+            prev = { x: e.clientX, y: e.clientY };
+            if (!boxPivot) return;
+            /* drag direita → roda para a direita; drag baixo → roda para baixo */
+            var qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx);
+            var qX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy);
+            rotQuat.premultiply(qY).premultiply(qX);
+            boxPivot.quaternion.copy(rotQuat);
         });
         c3.addEventListener('wheel', function (e) {
             e.preventDefault();
@@ -443,7 +442,11 @@
 
         (function loop() {
             requestAnimationFrame(loop);
-            if (autoRotate && currentView === '3d') { sph.theta += 0.005; updateCam(); }
+            if (autoRotate && currentView === '3d' && boxPivot) {
+                var qAuto = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.005);
+                rotQuat.premultiply(qAuto);
+                boxPivot.quaternion.copy(rotQuat);
+            }
             renderer.render(scene, camera);
         })();
     }
@@ -568,10 +571,10 @@
             if (hits.length) {
                 selectedFace = hits[0].object.name;
                 updateArtworkPanel(selectedFace);
-                /* Abrir o accordion de artwork automaticamente */
+                /* Abrir o card de artwork automaticamente */
                 var acc = document.getElementById('acc-upload');
-                if (acc && !acc.classList.contains('show')) {
-                    var btn = document.querySelector('[data-bs-target="#acc-upload"]');
+                if (acc && !acc.classList.contains('atp-scard--open')) {
+                    var btn = acc.querySelector('[data-atp-toggle]');
                     if (btn) btn.click();
                 }
             } else {
@@ -621,7 +624,11 @@
     wire('ctrl-zoom-out', function () { sph.r = Math.min(ZOOM_MAX, sph.r + sceneSize * 0.08); updateCam(); });
     wire('ctrl-reset', function () {
         stopAnim(); animT = 0; animDir = 1; updateSlider(0); updateFolds(0);
-        sph.theta = 0.9; sph.phi = 1.0; sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5); updateCam();
+        if (rotQuat && boxPivot) {
+            rotQuat.set(0, 0, 0, 1);
+            boxPivot.quaternion.copy(rotQuat);
+        }
+        sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5); updateCam();
     });
 
     var slider = document.getElementById('animSlider');
@@ -829,6 +836,16 @@
                 svgTextCache = text;
                 var geo = DielineParser.build(text);
                 if (!geo.nodes || !geo.nodes.length) { showEmpty('Dieline sem painéis válidos.'); return; }
+                /* Sincronizar inputs com as dimensões reais do SVG armazenado,
+                   para que o infoBlank e os inputs reflictam o que está no modelo. */
+                if (geo.meta && geo.meta.length && geo.meta.width && geo.meta.height) {
+                    var iL = document.getElementById('iL');
+                    var iW = document.getElementById('iW');
+                    var iH = document.getElementById('iH');
+                    if (iL) iL.value = Math.round(geo.meta.length);
+                    if (iW) iW.value = Math.round(geo.meta.width);
+                    if (iH) iH.value = Math.round(geo.meta.height);
+                }
                 buildFromGeometry(geo);
                 sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5);
                 updateCam();
