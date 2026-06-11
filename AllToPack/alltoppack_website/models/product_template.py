@@ -33,6 +33,19 @@ class ProductTemplate(models.Model):
     box_artwork = fields.Text(string='Artwork JSON', default='{}',
         help='JSON dict {face_key: base64_data_url} com as imagens aplicadas a cada face.')
 
+    card_image_normal = fields.Binary(
+        string='Imagem do Card (normal)',
+        attachment=True,
+        help='Imagem exibida no card do produto na loja (estado normal).',
+    )
+    card_image_normal_fname = fields.Char(string='Nome ficheiro imagem normal')
+    card_image_hover = fields.Binary(
+        string='Imagem do Card (hover)',
+        attachment=True,
+        help='Imagem exibida no card do produto quando o cursor está por cima.',
+    )
+    card_image_hover_fname = fields.Char(string='Nome ficheiro imagem hover')
+
     def action_open_dieline_3d(self):
         self.ensure_one()
         return {

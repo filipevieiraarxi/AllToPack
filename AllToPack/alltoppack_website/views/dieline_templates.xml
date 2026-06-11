@@ -195,6 +195,15 @@
                                                 <i class="fa fa-trash"/>
                                             </button>
                                         </div>
+                                        <div id="atp-artwork-rot-row" class="atp-artwork-rot-row">
+                                            <button id="atp-artwork-rot-ccw" class="atp-artwork-rot-btn" title="Rotate 90° counter-clockwise">
+                                                <i class="fa fa-undo"/>
+                                            </button>
+                                            <span id="atp-artwork-rot-label" class="atp-artwork-rot-deg">0°</span>
+                                            <button id="atp-artwork-rot-cw" class="atp-artwork-rot-btn" title="Rotate 90° clockwise">
+                                                <i class="fa fa-repeat"/>
+                                            </button>
+                                        </div>
                                         <img id="atp-artwork-preview" alt="preview"
                                              style="display:none;width:100%;border-radius:6px;margin:8px 0"/>
                                         <label class="atp-scard-btn w-100 text-center mb-1" for="fileArtwork">

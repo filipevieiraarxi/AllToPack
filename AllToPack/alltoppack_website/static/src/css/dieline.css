@@ -477,6 +477,32 @@
     padding: 2px 4px;
     font-size: 13px;
 }
+.atp-artwork-rot-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.atp-artwork-rot-btn {
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    color: #1d4ed8;
+    cursor: pointer;
+    padding: 4px 10px;
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.15s;
+}
+.atp-artwork-rot-btn:hover { background: #dbeafe; }
+.atp-artwork-rot-deg {
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    min-width: 32px;
+    text-align: center;
+}
 
 /* Manufacturing rows */
 .atp-mfg-row {

@@ -104,17 +104,20 @@
 
         <!-- Overlay SVG dentro da div.oe_product_image (position:absolute, cobre toda a área) -->
         <xpath expr="//div[hasclass('oe_product_image')]" position="inside">
-            <t t-if="product.box_type">
+            <t t-if="product.card_image_normal or product.card_image_hover or product.box_dieline_svg">
                 <a t-att-href="'/dieline?product_id=%d' % product.id"
                    class="atp-box-overlay"
                    t-att-title="'Configurar ' + product.name">
-                    <img class="atp-box-icon atp-box-icon--normal"
-                         t-att-src="'/alltoppack_website/static/src/img/%s_normal.svg' % product.box_type"
+                    <img t-if="product.card_image_normal"
+                         class="atp-box-icon atp-box-icon--normal"
+                         t-att-src="'/web/image/product.template/%d/card_image_normal' % product.id"
                          t-att-alt="product.name"/>
-                    <img class="atp-box-icon atp-box-icon--hover"
-                         t-att-src="'/alltoppack_website/static/src/img/%s_hover.svg' % product.box_type"
+                    <img t-if="product.card_image_hover"
+                         class="atp-box-icon atp-box-icon--hover"
+                         t-att-src="'/web/image/product.template/%d/card_image_hover' % product.id"
                          t-att-alt="product.name"/>
-                    <img t-if="product.box_dieline_svg" class="atp-box-icon atp-box-icon--dieline"
+                    <img t-if="product.box_dieline_svg"
+                         class="atp-box-icon atp-box-icon--dieline"
                          t-att-src="'/dieline/svg/%d' % product.id"
                          t-att-alt="product.name + ' 2D'"/>
                 </a>
@@ -130,7 +133,7 @@
 
         <!-- Botão "Ver Dieline" na barra de botões do card -->
         <xpath expr="//div[hasclass('o_wsale_product_btn')]" position="inside">
-            <t t-if="product.box_type">
+            <t t-if="product.box_dieline_svg">
                 <a t-att-href="'/dieline?product_id=%d' % product.id"
                    class="atp-dieline-btn-small"
                    t-att-title="'Dieline ' + product.name">

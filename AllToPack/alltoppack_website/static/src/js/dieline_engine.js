@@ -39,6 +39,7 @@
     var folds = [];
     var svgTextCache = null;
     var artwork = {};        /* { face_key: data_url } — estado local do artwork */
+    var artworkRot = {};     /* { face_key: degrees } — rotação do logo por face (0/90/180/270) */
     var selectedFace = null; /* face_key seleccionada pelo raycasting */
     var meshMap = {};        /* { face_key: mesh } para aplicar texturas */
     /* centro/escala da cena (mm) para câmara e eixos */
@@ -122,6 +123,18 @@
         var groups = {};
         folds = [];
 
+        /* Calcular profundidade de cada node na árvore (root=0, filhos=1, netos=2…).
+           Usado para escalonar a animação por fases. */
+        var nodeDepth = {};
+        geo.nodes.forEach(function (node) {
+            if (node.parentKey == null) {
+                nodeDepth[node.key] = 0;
+            } else {
+                nodeDepth[node.key] = (nodeDepth[node.parentKey] || 0) + 1;
+            }
+            node.depth = nodeDepth[node.key];
+        });
+
         geo.nodes.forEach(function (node) {
             /* Os filhos penduram no FOLDGROUP do pai (para acompanharem a
                dobra do pai). groups[key] = { attach, restWorld }. */
@@ -142,6 +155,7 @@
             groups[node.key] = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color);
         });
 
+        calcFoldWindows();
         updateFolds(animT);
         buildAxes();
         updateInfo(geo);
@@ -205,7 +219,7 @@
         var mesh = shapeMesh(pts2d, color, node.key);
         foldGroup.add(mesh);
 
-        folds.push({ pivot: foldGroup, angle: node.angle, sign: -1 });
+        folds.push({ pivot: foldGroup, angle: node.angle, sign: -1, depth: node.depth || 0 });
 
         return { attach: foldGroup, restWorld: childRestWorld };
     }
@@ -299,13 +313,63 @@
     }
 
     /* ════════════════════════════════════════════════════════════
-       ANIMAÇÃO DAS DOBRAS — genérica
+       ANIMAÇÃO DAS DOBRAS — faseada por profundidade na árvore
+       ════════════════════════════════════════════════════════════
+
+       Cada dobra tem uma janela [tStart, tEnd] dentro do animT global
+       (0→1). As dobras de menor profundidade (paredes principais)
+       começam primeiro; as de maior profundidade (abas, tampas)
+       arrancam com um ligeiro delay mas sobrepõem-se às anteriores,
+       dando uma sensação orgânica de construção progressiva.
+
+       OVERLAP = fracção de sobreposição entre fases adjacentes (0=sem
+       sobreposição, 1=tudo ao mesmo tempo). 0.35 é um bom ponto de
+       partida: cada grupo começa enquanto o anterior ainda está a dobrar.
        ════════════════════════════════════════════════════════════ */
+    var OVERLAP = 0.35;
+
+    /* Calcula as janelas de tempo para cada dobra após buildFromGeometry.
+       Chamado uma vez por buildFromGeometry, logo depois de folds ser preenchido. */
+    function calcFoldWindows() {
+        if (!folds.length) return;
+
+        /* Determinar profundidade máxima */
+        var maxDepth = 0;
+        for (var i = 0; i < folds.length; i++) {
+            maxDepth = Math.max(maxDepth, folds[i].depth || 0);
+        }
+        var numLevels = maxDepth + 1; /* 0 … maxDepth */
+
+        /* Largura de cada "fase" no espaço [0,1].
+           Com OVERLAP, cada fase começa antes da anterior terminar.
+           tStart[d] = d * step_nooverlap * (1 - OVERLAP)
+           Garantir que a última fase termina exactamente em 1. */
+        var stepBase = 1 / Math.max(numLevels, 1);
+        var stepShift = stepBase * (1 - OVERLAP);
+        var windowW   = stepBase * (1 + OVERLAP * (numLevels - 1) / numLevels);
+        /* simplificação mais robusta: janela fixa por nível */
+        var winW = stepBase + OVERLAP * stepBase;
+
+        for (var j = 0; j < folds.length; j++) {
+            var d = folds[j].depth || 0;
+            var tS = d * stepShift;
+            var tE = tS + winW;
+            /* Clamp para não ultrapassar 1 */
+            if (tE > 1) { tE = 1; }
+            folds[j].tStart = tS;
+            folds[j].tEnd   = tE;
+        }
+    }
+
     function updateFolds(t) {
-        var k = ease(Math.max(0, Math.min(1, t)));
         for (var i = 0; i < folds.length; i++) {
             var f = folds[i];
-            /* dobra em torno de X local do foldGroup (= û da aresta) */
+            /* mapear t global para t local [0,1] dentro da janela desta dobra */
+            var tS = f.tStart !== undefined ? f.tStart : 0;
+            var tE = f.tEnd   !== undefined ? f.tEnd   : 1;
+            var tLocal = tE > tS ? (t - tS) / (tE - tS) : t;
+            tLocal = Math.max(0, Math.min(1, tLocal));
+            var k = ease(tLocal);
             f.pivot.rotation.x = k * deg2rad(f.angle) * f.sign;
         }
     }
@@ -476,15 +540,132 @@
 
     /* ── ARTWORK ────────────────────────────────────────────────── */
 
+    /* Lê o bounding box 2D dos vértices de uma ShapeGeometry. */
+    function faceBBox(geometry) {
+        var pos = geometry.attributes.position;
+        var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (var i = 0; i < pos.count; i++) {
+            var x = pos.getX(i), y = pos.getY(i);
+            if (x < minX) minX = x; if (x > maxX) maxX = x;
+            if (y < minY) minY = y; if (y > maxY) maxY = y;
+        }
+        return { minX: minX, minY: minY, w: maxX - minX || 1, h: maxY - minY || 1 };
+    }
+
+    /* Normaliza os UVs de uma ShapeGeometry para [0,1]×[0,1] sobre o bbox. */
+    function normaliseFaceUVs(geometry) {
+        var bb = faceBBox(geometry);
+        var pos = geometry.attributes.position;
+        var uv = geometry.attributes.uv;
+        if (!uv) return;
+        for (var j = 0; j < uv.count; j++) {
+            uv.setXY(j, (pos.getX(j) - bb.minX) / bb.w, (pos.getY(j) - bb.minY) / bb.h);
+        }
+        uv.needsUpdate = true;
+    }
+
+    /* Compõe um canvas com a cor base da face e o logo centrado (object-fit:contain).
+       O canvas tem a mesma proporção da face para que a textura não distorça.
+       rotDeg: rotação do logo em graus (0/90/180/270). */
+    /* Remove o fundo (quase-)branco de uma imagem, devolvendo um canvas com
+       esses pixels transparentes. Assim a cor da face do modelo 3D aparece
+       por trás do logo em vez de uma caixa branca.
+       THRESHOLD: quão claro tem de ser o pixel (0-255 por canal) para ser
+       considerado "branco" e removido. 235 apanha brancos e quase-brancos
+       sem comer demasiado de logos com tons claros legítimos. */
+    function stripWhiteBackground(img) {
+        var THRESHOLD = 235;
+        var canvas = document.createElement('canvas');
+        canvas.width = img.width; canvas.height = img.height;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        try {
+            var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            var px = data.data;
+            for (var i = 0; i < px.length; i += 4) {
+                if (px[i] >= THRESHOLD && px[i + 1] >= THRESHOLD && px[i + 2] >= THRESHOLD) {
+                    px[i + 3] = 0; /* alpha → transparente */
+                }
+            }
+            ctx.putImageData(data, 0, 0);
+        } catch (e) {
+            /* getImageData pode falhar por CORS — devolve a imagem intacta */
+        }
+        return canvas;
+    }
+
+    function buildCompositeTexture(faceColor, img, faceW, faceH, rotDeg) {
+        var BASE = 1024;
+        var rot = ((rotDeg || 0) % 360 + 360) % 360;
+        var swapped = (rot === 90 || rot === 270);
+
+        /* Canvas proporcional à face — evita distorção nas faces não-quadradas.
+           Se o logo está rodado 90/270°, trocar w/h para o cálculo do aspect-ratio. */
+        var cw, ch;
+        if (faceW >= faceH) {
+            cw = BASE; ch = Math.max(1, Math.round(BASE * faceH / faceW));
+        } else {
+            ch = BASE; cw = Math.max(1, Math.round(BASE * faceW / faceH));
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = cw; canvas.height = ch;
+        var ctx = canvas.getContext('2d');
+
+        /* Fundo com a cor da face */
+        var hex = '#' + ('000000' + faceColor.toString(16)).slice(-6);
+        ctx.fillStyle = hex;
+        ctx.fillRect(0, 0, cw, ch);
+
+        /* Remover o fundo branco do logo antes de o desenhar */
+        var logo = stripWhiteBackground(img);
+
+        /* Dimensões disponíveis para o logo após a rotação */
+        var maxW = swapped ? ch * 0.8 : cw * 0.8;
+        var maxH = swapped ? cw * 0.8 : ch * 0.8;
+        var iAR = img.width / img.height;
+        var drawW = maxW, drawH = maxW / iAR;
+        if (drawH > maxH) { drawH = maxH; drawW = maxH * iAR; }
+
+        /* Flipar verticalmente (correção eixo Y canvas↔UVs) + rotação do logo */
+        ctx.save();
+        ctx.translate(cw / 2, ch / 2);
+        ctx.scale(1, -1);
+        ctx.rotate(rot * Math.PI / 180);
+        ctx.drawImage(logo, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+
+        return new THREE.CanvasTexture(canvas);
+    }
+
     function applyArtworkToFace(faceKey, dataUrl) {
         var mesh = meshMap[faceKey];
         if (!mesh) return;
         var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
-        var tex = new THREE.TextureLoader().load(dataUrl);
-        tex.flipY = false;
-        mesh.material = new THREE.MeshLambertMaterial({
-            map: tex, side: side, transparent: true, opacity: 0.95,
-        });
+
+        /* Cor actual da face (antes de substituir o material) */
+        var faceColor = (mesh.material && mesh.material.color)
+            ? mesh.material.color.getHex()
+            : COL_WALL;
+
+        /* Normalizar UVs para que a textura cubra exactamente a face */
+        if (mesh.geometry) normaliseFaceUVs(mesh.geometry);
+
+        /* Calcular aspect ratio real da face em mm */
+        var faceW = 1, faceH = 1;
+        if (mesh.geometry) {
+            var bb = faceBBox(mesh.geometry);
+            faceW = bb.w; faceH = bb.h;
+        }
+
+        var img = new Image();
+        img.onload = function () {
+            var tex = buildCompositeTexture(faceColor, img, faceW, faceH, artworkRot[faceKey] || 0);
+            tex.flipY = false;
+            mesh.material = new THREE.MeshLambertMaterial({
+                map: tex, side: side, transparent: true, opacity: 0.95,
+            });
+        };
+        img.src = dataUrl;
         artwork[faceKey] = dataUrl;
     }
 
@@ -494,6 +675,7 @@
         var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
         mesh.material = makeMatSide(COL_WALL, side);
         delete artwork[faceKey];
+        delete artworkRot[faceKey];
     }
 
     /* Painel lateral que aparece quando uma face está seleccionada */
@@ -519,6 +701,10 @@
             }
         }
         if (btnRemove) btnRemove.style.display = artwork[faceKey] ? '' : 'none';
+        var rotRow = document.getElementById('atp-artwork-rot-row');
+        var rotLabel = document.getElementById('atp-artwork-rot-label');
+        if (rotRow) rotRow.style.display = artwork[faceKey] ? '' : 'none';
+        if (rotLabel) rotLabel.textContent = (artworkRot[faceKey] || 0) + '°';
     }
 
     /* Raycasting — hover highlight + clique selecciona face */
@@ -590,7 +776,11 @@
         fetch('/dieline/artwork/load?product_id=' + productId)
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                artwork = data || {};
+                data = data || {};
+                /* Rotações guardadas sob a chave reservada __rot__ */
+                artworkRot = data.__rot__ || {};
+                delete data.__rot__;
+                artwork = data;
                 Object.keys(artwork).forEach(function (k) { applyArtworkToFace(k, artwork[k]); });
             })
             .catch(function () {});
@@ -599,10 +789,14 @@
     /* Guardar artwork no backend */
     function saveArtwork(productId) {
         if (!productId) return;
+        /* Incluir as rotações sob a chave reservada __rot__ no mesmo payload */
+        var payload = {};
+        Object.keys(artwork).forEach(function (k) { payload[k] = artwork[k]; });
+        payload.__rot__ = artworkRot;
         fetch('/dieline/artwork/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: { product_id: productId, artwork: artwork } }),
+            body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: { product_id: productId, artwork: payload } }),
         })
         .then(function (r) { return r.json(); })
         .then(function (res) {
@@ -798,13 +992,16 @@
             fileArtwork.addEventListener('change', function () {
                 if (!selectedFace || !this.files[0]) return;
                 var reader = new FileReader();
+                var fileName = this.files[0].name;
                 reader.onload = function (e) {
                     applyArtworkToFace(selectedFace, e.target.result);
                     updateArtworkPanel(selectedFace);
                     var name = document.getElementById('artworkName');
-                    if (name) name.textContent = fileArtwork.files[0].name;
+                    if (name) name.textContent = fileName;
                 };
                 reader.readAsDataURL(this.files[0]);
+                /* Limpar o valor para permitir seleccionar o mesmo ficheiro noutra face */
+                this.value = '';
             });
         }
 
@@ -816,6 +1013,20 @@
                 updateArtworkPanel(selectedFace);
             });
         }
+
+        function rotateArtwork(delta) {
+            if (!selectedFace || !artwork[selectedFace]) return;
+            artworkRot[selectedFace] = (((artworkRot[selectedFace] || 0) + delta) % 360 + 360) % 360;
+            applyArtworkToFace(selectedFace, artwork[selectedFace]);
+            var rotLabel = document.getElementById('atp-artwork-rot-label');
+            if (rotLabel) rotLabel.textContent = artworkRot[selectedFace] + '°';
+        }
+
+        var btnRotCCW = document.getElementById('atp-artwork-rot-ccw');
+        if (btnRotCCW) btnRotCCW.addEventListener('click', function () { rotateArtwork(-90); });
+
+        var btnRotCW = document.getElementById('atp-artwork-rot-cw');
+        if (btnRotCW) btnRotCW.addEventListener('click', function () { rotateArtwork(90); });
 
         var btnSaveArtwork = document.getElementById('atp-artwork-save');
         if (btnSaveArtwork) {

@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
+    <!-- Redireciona o item "Shop" do menu para /packaging -->
+    <record id="website_sale.menu_shop" model="website.menu">
+        <field name="url">/packaging</field>
+    </record>
+
     <!-- ============================================================
          LANDING PAGE — herda website.homepage e substitui o conteúdo
          ============================================================ -->

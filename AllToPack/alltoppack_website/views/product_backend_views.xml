@@ -16,6 +16,16 @@
                             <field name="box_w" string="Largura W (mm)"/>
                             <field name="box_h" string="Altura H (mm)"/>
                         </group>
+                        <group string="Imagens do Card">
+                            <field name="card_image_normal" widget="binary"
+                                   filename="card_image_normal_fname"
+                                   string="Imagem normal"/>
+                            <field name="card_image_normal_fname" invisible="1"/>
+                            <field name="card_image_hover" widget="binary"
+                                   filename="card_image_hover_fname"
+                                   string="Imagem hover"/>
+                            <field name="card_image_hover_fname" invisible="1"/>
+                        </group>
                         <group string="SVG de Dieline">
                             <field name="box_dieline_svg" widget="binary"
                                    filename="box_dieline_svg_fname"
