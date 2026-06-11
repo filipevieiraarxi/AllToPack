@@ -40,6 +40,7 @@
     var svgTextCache = null;
     var artwork = {};        /* { face_key: data_url } — estado local do artwork */
     var artworkRot = {};     /* { face_key: degrees } — rotação do logo por face (0/90/180/270) */
+    var faceBaseColor = {};  /* { face_key: hex } — cor original da face, antes de qualquer textura */
     var selectedFace = null; /* face_key seleccionada pelo raycasting */
     var meshMap = {};        /* { face_key: mesh } para aplicar texturas */
     /* centro/escala da cena (mm) para câmara e eixos */
@@ -379,6 +380,7 @@
         boxGroup = null;
         folds = [];
         meshMap = {};
+        faceBaseColor = {};
         selectedFace = null;
         updateArtworkPanel(null);
     }
@@ -642,10 +644,15 @@
         if (!mesh) return;
         var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
 
-        /* Cor actual da face (antes de substituir o material) */
-        var faceColor = (mesh.material && mesh.material.color)
-            ? mesh.material.color.getHex()
-            : COL_WALL;
+        /* Cor base da face. Memorizada na primeira aplicação para que
+           re-aplicações (ex.: ao rodar) não herdem o branco da textura
+           anterior — uma material com `map` reporta color = 0xffffff. */
+        if (faceBaseColor[faceKey] === undefined) {
+            faceBaseColor[faceKey] = (mesh.material && mesh.material.map)
+                ? COL_WALL
+                : (mesh.material && mesh.material.color ? mesh.material.color.getHex() : COL_WALL);
+        }
+        var faceColor = faceBaseColor[faceKey];
 
         /* Normalizar UVs para que a textura cubra exactamente a face */
         if (mesh.geometry) normaliseFaceUVs(mesh.geometry);
@@ -676,6 +683,7 @@
         mesh.material = makeMatSide(COL_WALL, side);
         delete artwork[faceKey];
         delete artworkRot[faceKey];
+        delete faceBaseColor[faceKey];
     }
 
     /* Painel lateral que aparece quando uma face está seleccionada */
