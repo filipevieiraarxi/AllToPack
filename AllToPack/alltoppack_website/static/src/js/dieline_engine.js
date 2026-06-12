@@ -51,11 +51,27 @@
     var COL_WALL = 0xf7d05a;
     var COL_LID  = 0xe8a020;
 
+    /* polygonOffset empurra ligeiramente cada polígono em profundidade,
+       eliminando o z-fighting entre abas coplanares (várias abas no mesmo
+       lado da caixa fechada piscavam por estarem exactamente no mesmo plano). */
+    function applyPolyOffset(matOpts, order) {
+        matOpts.polygonOffset = true;
+        /* Desempate de z-fighting entre painéis coplanares (ex.: as flaps da
+           tampa que se encontram ao meio). Cada painel recebe um offset
+           ÚNICO mas de magnitude MÍNIMA: só a parte fracionária do `units`
+           varia com o índice. Assim a ordem no depth buffer é determinística
+           sem deslocar a geometria de forma percetível — valores grandes
+           faziam os lados parecer "afundados" ao rodar. */
+        var o = order || 0;
+        matOpts.polygonOffsetFactor = 0;
+        matOpts.polygonOffsetUnits = -(o + 1) * 0.05;
+        return matOpts;
+    }
+
     function makeMat(color) {
-        return new THREE.MeshLambertMaterial({
+        return new THREE.MeshLambertMaterial(applyPolyOffset({
             color: color, side: THREE.DoubleSide,
-            transparent: true, opacity: 0.95,
-        });
+        }));
     }
 
     function ease(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
@@ -127,13 +143,18 @@
         /* Calcular profundidade de cada node na árvore (root=0, filhos=1, netos=2…).
            Usado para escalonar a animação por fases. */
         var nodeDepth = {};
-        geo.nodes.forEach(function (node) {
+        geo.nodes.forEach(function (node, idx) {
             if (node.parentKey == null) {
                 nodeDepth[node.key] = 0;
             } else {
                 nodeDepth[node.key] = (nodeDepth[node.parentKey] || 0) + 1;
             }
             node.depth = nodeDepth[node.key];
+            /* Ordem de empilhamento ÚNICA por nó (índice na lista). Usada no
+               polygonOffset para que abas COPLANARES com o mesmo depth (ex.: as
+               flaps front_top e back_top da tampa, que se encontram ao meio)
+               recebam offsets distintos e não pisquem (z-fighting). */
+            node.stackOrder = idx;
         });
 
         geo.nodes.forEach(function (node) {
@@ -146,7 +167,7 @@
                       : node.angle >= 135 ? COL_LID : COL_WALL;
 
             if (node.parentKey == null) {
-                var mesh = polyMesh(node.points, off, mm, color, node.key);
+                var mesh = polyMesh(node.points, off, mm, color, node.key, node.stackOrder || 0);
                 mesh.rotation.x = Math.PI / 2;
                 boxGroup.add(mesh);
                 groups[node.key] = { attach: boxGroup, restWorld: new THREE.Matrix4() };
@@ -217,7 +238,7 @@
             var rel = P.clone().sub(A);
             return new THREE.Vector2(rel.dot(uHat), rel.dot(nHat));
         });
-        var mesh = shapeMesh(pts2d, color, node.key);
+        var mesh = shapeMesh(pts2d, color, node.key, node.stackOrder || 0);
         foldGroup.add(mesh);
 
         folds.push({ pivot: foldGroup, angle: node.angle, sign: -1, depth: node.depth || 0 });
@@ -238,20 +259,26 @@
 
     /* ── GEOMETRIA DE POLÍGONOS ──────────────────────────────────── */
 
-    function makeMatSide(color, side) {
-        return new THREE.MeshLambertMaterial({
-            color: color, side: side, transparent: true, opacity: 0.95,
-        });
+    function makeMatSide(color, side, order) {
+        return new THREE.MeshLambertMaterial(applyPolyOffset({
+            color: color, side: side,
+        }, order));
     }
 
     /* Cria um Group com dois meshes — _outer (FrontSide) e _inner (BackSide).
        Ambos são registados no meshMap com os sufixos correspondentes.
+       `order` = índice único do painel, usado no polygonOffset para empilhar
+       abas coplanares numa ordem fixa (evita z-fighting).
        Devolve o Group para adicionar ao pai. */
-    function makeFacePair(geo, color, key) {
-        var outer = new THREE.Mesh(geo, makeMatSide(color, THREE.FrontSide));
-        var inner = new THREE.Mesh(geo, makeMatSide(color, THREE.BackSide));
+    function makeFacePair(geo, color, key, order) {
+        var outer = new THREE.Mesh(geo, makeMatSide(color, THREE.FrontSide, order));
+        var inner = new THREE.Mesh(geo, makeMatSide(color, THREE.BackSide, order));
         outer.name = key + '_outer';
         inner.name = key + '_inner';
+        /* guardar a ordem no mesh para reaplicar o polygonOffset quando a
+           face recebe ou perde textura de artwork */
+        outer.userData.order = order || 0;
+        inner.userData.order = order || 0;
         meshMap[key + '_outer'] = outer;
         meshMap[key + '_inner'] = inner;
         var grp = new THREE.Group();
@@ -263,24 +290,24 @@
 
     /* Mesh do ROOT: shape a partir dos pontos SVG (deslocados por off,
        escalados para mm). Fica no plano XY local (depois rodado p/ XZ). */
-    function polyMesh(points, off, mm, color, key) {
+    function polyMesh(points, off, mm, color, key, order) {
         var shape = new THREE.Shape();
         points.forEach(function (p, i) {
             var x = mm(p.x - off.x), y = mm(p.y - off.y);
             if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
         });
         shape.closePath();
-        return makeFacePair(new THREE.ShapeGeometry(shape), color, key);
+        return makeFacePair(new THREE.ShapeGeometry(shape), color, key, order);
     }
 
     /* Mesh de um painel-filho a partir de pontos 2D (s,d) já em mm. */
-    function shapeMesh(pts2d, color, key) {
+    function shapeMesh(pts2d, color, key, order) {
         var shape = new THREE.Shape();
         pts2d.forEach(function (p, i) {
             if (i === 0) shape.moveTo(p.x, p.y); else shape.lineTo(p.x, p.y);
         });
         shape.closePath();
-        return makeFacePair(new THREE.ShapeGeometry(shape), color, key);
+        return makeFacePair(new THREE.ShapeGeometry(shape), color, key, order);
     }
 
     function polyBBox(points) {
@@ -668,9 +695,9 @@
         img.onload = function () {
             var tex = buildCompositeTexture(faceColor, img, faceW, faceH, artworkRot[faceKey] || 0);
             tex.flipY = false;
-            mesh.material = new THREE.MeshLambertMaterial({
-                map: tex, side: side, transparent: true, opacity: 0.95,
-            });
+            mesh.material = new THREE.MeshLambertMaterial(applyPolyOffset({
+                map: tex, side: side,
+            }, mesh.userData.order || 0));
         };
         img.src = dataUrl;
         artwork[faceKey] = dataUrl;
@@ -680,7 +707,7 @@
         var mesh = meshMap[faceKey];
         if (!mesh) return;
         var side = faceKey.endsWith('_outer') ? THREE.FrontSide : THREE.BackSide;
-        mesh.material = makeMatSide(COL_WALL, side);
+        mesh.material = makeMatSide(COL_WALL, side, mesh.userData.order || 0);
         delete artwork[faceKey];
         delete artworkRot[faceKey];
         delete faceBaseColor[faceKey];
@@ -728,6 +755,50 @@
             }
         }
 
+        /* Quando a caixa está fechada, várias abas ficam coplanares no mesmo
+           lado e o raycaster devolve-as todas praticamente à mesma distância.
+           A ordem dos hits é então instável → o cursor "salta" entre abas.
+
+           Para que a SELEÇÃO concorde com o que está RENDERIZADO à frente,
+           replicamos aqui a regra do polygonOffset: entre os hits virados
+           para a câmara, escolhemos o de MAIOR `order` (= o que o offset
+           empurrou para a frente), dentro de um grupo coplanar (mesma
+           distância dentro de um epsilon). Assim seleciona-se sempre a aba
+           de cima e o cursor é determinístico. */
+        var COPLANAR_EPS = 0.5; /* mm: hits dentro disto são "mesmo plano" */
+
+        function hitOrder(h) {
+            var o = h.object && h.object.userData ? h.object.userData.order : 0;
+            return o || 0;
+        }
+
+        function facesCamera(h) {
+            if (!h.face) return true;
+            var n = new THREE.Vector3()
+                .copy(h.face.normal)
+                .transformDirection(h.object.matrixWorld);
+            var toCam = camera.position.clone().sub(h.point);
+            return n.dot(toCam) > 0;
+        }
+
+        function pickVisibleHit(hits) {
+            if (!hits.length) return null;
+            /* só hits virados para o observador (descarta back-faces atrás) */
+            var visible = hits.filter(facesCamera);
+            if (!visible.length) visible = hits;
+
+            /* O 1.º hit visível define o plano da frente; juntamos todos os
+               coplanares a esse e escolhemos o de maior `order` (o de cima). */
+            var front = visible[0];
+            var best = front;
+            for (var i = 1; i < visible.length; i++) {
+                var h = visible[i];
+                if (h.distance - front.distance > COPLANAR_EPS) break; /* já é mais fundo */
+                if (hitOrder(h) > hitOrder(best)) best = h;
+            }
+            return best;
+        }
+
         c3.addEventListener('mousemove', function (e) {
             var rect = c3.getBoundingClientRect();
             mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
@@ -735,11 +806,14 @@
             raycaster.setFromCamera(mouse, camera);
             var meshes = Object.values(meshMap);
             var hits = raycaster.intersectObjects(meshes, false);
-            var hit = hits.length ? hits[0].object : null;
+            var vh = pickVisibleHit(hits);
+            var hit = vh ? vh.object : null;
             if (hit !== hoveredMesh) {
                 setEmissive(hoveredMesh, 0x000000);
                 hoveredMesh = hit;
-                setEmissive(hoveredMesh, 0x888888);
+                /* Tom subtil em vez do branco forte: realça a face sem a
+                   clarear ao ponto de expor as abas coplanares por baixo. */
+                setEmissive(hoveredMesh, 0x1b3a5c);
                 c3.style.cursor = hit ? 'pointer' : 'default';
             }
         });
@@ -762,8 +836,9 @@
             raycaster.setFromCamera(mouse, camera);
             var meshes = Object.values(meshMap);
             var hits = raycaster.intersectObjects(meshes, false);
-            if (hits.length) {
-                selectedFace = hits[0].object.name;
+            var vh = pickVisibleHit(hits);
+            if (vh) {
+                selectedFace = vh.object.name;
                 updateArtworkPanel(selectedFace);
                 /* Abrir o card de artwork automaticamente */
                 var acc = document.getElementById('acc-upload');

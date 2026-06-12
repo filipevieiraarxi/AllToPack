@@ -9,3 +9,7 @@ __pycache__/
 *.log
 
 .local/
+
+# Segredos (Stripe, etc.) — NUNCA commitar
+*stripe_keys*.json
+*.secret.json
