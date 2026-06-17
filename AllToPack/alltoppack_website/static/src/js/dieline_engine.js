@@ -937,14 +937,6 @@
         var halfW = logoWmm / 2, halfH = logoHmm / 2;
         var cx = logoCenter.s, cy = logoCenter.d;
 
-        /* A rotação do logo no espaço local do painel = rotação SVG − ângulo do referencial local.
-           localAngle é o ângulo de û face ao eixo SVG-X. O logo foi posicionado com
-           logoRot em coords SVG, então no espaço local roda por (logoRot_rad - localAngle).
-           Mas n̂ pode apontar para cima ou baixo → o sinal de d pode estar invertido.
-           Também precisamos de contabilizar que n̂ tem sinal (pode ser -SVG-Y):
-           testamos se o centróide do painel tem d positivo em relação a A,
-           mas isso já foi corrigido no buildChild (nHat aponta sempre para dentro).
-           A compensação é: rad_local = logoRot_rad - localAngle. */
         var rad = logoRot * Math.PI / 180 - localAngle;
         var cosR = Math.cos(rad), sinR = Math.sin(rad);
 
@@ -1020,8 +1012,7 @@
                     outData[outIdx] = bgR; outData[outIdx+1] = bgG;
                     outData[outIdx+2] = bgB; outData[outIdx+3] = 255;
                 } else {
-                    var lxSample = mirrorS ? -lx : lx;
-                    var ix = Math.round((lxSample / logoWmm + 0.5) * imgW - 0.5);
+                    var ix = Math.round((lx / logoWmm + 0.5) * imgW - 0.5);
                     var iy = Math.round((ly / logoHmm + 0.5) * imgH - 0.5);
                     ix = Math.max(0, Math.min(imgW-1, ix));
                     iy = Math.max(0, Math.min(imgH-1, iy));
@@ -1099,10 +1090,17 @@
                     return;
                 }
 
-                var texCanvas = buildPanelLogoTexture(nodeLocal.localPts, nodeLocal.svgToLocal, nodeLocal.localAngle, fc, img, logoPosInDieline, logoPx, side === 'front');
+                var texCanvas = buildPanelLogoTexture(nodeLocal.localPts, nodeLocal.svgToLocal, nodeLocal.localAngle, fc, img, logoPosInDieline, logoPx);
                 if (texCanvas) {
                     var tex = new THREE.CanvasTexture(texCanvas);
                     tex.flipY = false;
+                    if (side === 'front') {
+                        /* _outer usa FrontSide: UVs crescem com s, mas o _inner com
+                           BackSide vê o verso e des-espelha naturalmente. Para _outer
+                           aplicar o mesmo efeito, espelhar a textura em U. */
+                        tex.repeat.x = -1;
+                        tex.offset.x = 1;
+                    }
                     normaliseFaceUVs(mesh.geometry);
                     mesh.material = new THREE.MeshLambertMaterial(applyPolyOffset(
                         { map: tex, side: threeSide }, mesh.userData.order || 0));
@@ -1277,12 +1275,8 @@
         var offY = (ch - dlH * scale) / 2 + logo2dPan.y;
         logo2dOffMM = { x: allMinX - offX / scale, y: allMinY - offY / scale };
 
-        /* Transformação SVG px → canvas px */
-        function tx(svgX) {
-            return logoSide === 'front'
-                ? cw - (offX + (svgX - allMinX) * scale)
-                : offX + (svgX - allMinX) * scale;
-        }
+        /* Transformação SVG px → canvas px (sem espelho — igual para frente e verso) */
+        function tx(svgX) { return offX + (svgX - allMinX) * scale; }
         function ty(svgY) { return offY + (svgY - allMinY) * scale; }
 
         /* Fundo */
@@ -1400,11 +1394,7 @@
             var offX = (c2logo.width  - dlW * scale) / 2 + logo2dPan.x;
             var offY = (c2logo.height - dlH * scale) / 2 + logo2dPan.y;
             var svgX, svgY;
-            if (logoSide === 'front') {
-                svgX = allMinX + (c2logo.width - canvasX - offX) / scale;
-            } else {
-                svgX = allMinX + (canvasX - offX) / scale;
-            }
+            svgX = allMinX + (canvasX - offX) / scale;
             svgY = allMinY + (canvasY - offY) / scale;
             return { x: svgX, y: svgY };
         }
