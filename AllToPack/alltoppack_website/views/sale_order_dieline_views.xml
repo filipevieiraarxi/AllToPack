@@ -33,10 +33,10 @@
                         -->
                     </div>
                     <notebook>
-                        <page string="SVG Frente" name="svg_front_page">
+                        <page string="Front" name="svg_front_page">
                             <field name="svg_front_html" readonly="1" nolabel="1"/>
                         </page>
-                        <page string="SVG Verso" name="svg_back_page">
+                        <page string="Back" name="svg_back_page">
                             <field name="svg_back_html" readonly="1" nolabel="1"/>
                         </page>
                     </notebook>
@@ -52,7 +52,7 @@
         <field name="inherit_id" ref="sale.view_order_form"/>
         <field name="arch" type="xml">
             <xpath expr="//page[@name='other_information']" position="after">
-                <page string="Dieline" name="atp_dieline"
+                <page string="Product details" name="atp_dieline"
                       invisible="not dieline_config_ids">
                     <field name="dieline_config_ids" nolabel="1" readonly="1">
                         <list string="Configurações Dieline">

@@ -394,7 +394,7 @@
             <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
             <!-- Parser e geradores devem ser carregados antes do engine -->
             <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=2"/>
-            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=52"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=53"/>
 
             <script>
                 (function () {

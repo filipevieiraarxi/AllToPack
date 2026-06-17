@@ -1687,11 +1687,8 @@
 
         function r2(n) { return Math.round(n * 100) / 100; }
 
-        /* Converter coord SVG px → mm no output, com espelhamento para frente */
-        function mx(svgX) {
-            var rel = (svgX - allMinX) * scaleToMM;
-            return side === 'front' ? r2(svgW - PAD - rel) : r2(PAD + rel);
-        }
+        /* Converter coord SVG px → mm no output (sem espelhamento) */
+        function mx(svgX) { return r2(PAD + (svgX - allMinX) * scaleToMM); }
         function my(svgY) { return r2(PAD + (svgY - allMinY) * scaleToMM); }
 
         var lines = [];
