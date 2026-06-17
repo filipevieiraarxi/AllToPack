@@ -5,8 +5,8 @@
 
 /* ── VARIÁVEIS ─────────────────────────────────────────────────── */
 :root {
-    --atp-primary:       #2563eb;
-    --atp-primary-dark:  #1d4ed8;
+    --atp-primary:       #1d4ed8;
+    --atp-primary-dark:  #1e40af;
     --atp-secondary:     #f59e0b;
     --atp-text:          #1e293b;
     --atp-text-muted:    #64748b;
@@ -306,7 +306,7 @@
 .atp-bf-dim input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
 .atp-bf-dim input[type="number"]:focus {
     outline: none;
-    border-color: var(--atp-primary, #2563eb);
+    border-color: var(--atp-primary, #1d4ed8);
     background: #fff;
 }
 
@@ -325,12 +325,12 @@
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    background: var(--atp-primary, #2563eb);
+    background: var(--atp-primary, #1d4ed8);
     color: #fff;
     transition: background .15s;
     text-align: center;
 }
-.atp-bf-btn:hover { background: var(--atp-primary-dark, #1d4ed8); }
+.atp-bf-btn:hover { background: var(--atp-primary-dark, #1e40af); }
 .atp-bf-btn--reset {
     background: transparent;
     color: var(--atp-text-muted, #64748b);
@@ -353,7 +353,7 @@
     background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
     border-color: #bfdbfe;
 }
-.atp-sidebar-contact .atp-sidebar-card__title { color: #1d4ed8; }
+.atp-sidebar-contact .atp-sidebar-card__title { color: #1e40af; }
 
 .atp-contact-btn {
     display: block;
@@ -362,13 +362,13 @@
     font-size: 12px;
     font-weight: 700;
     text-align: center;
-    background: var(--atp-primary, #2563eb);
+    background: var(--atp-primary, #1d4ed8);
     color: #fff;
     border-radius: 6px;
     text-decoration: none;
     transition: background .15s;
 }
-.atp-contact-btn:hover { background: var(--atp-primary-dark, #1d4ed8); color: #fff; }
+.atp-contact-btn:hover { background: var(--atp-primary-dark, #1e40af); color: #fff; }
 
 /* ================================================================
    BOX SVG OVERLAY — cobre a área de imagem de cada product card
@@ -421,113 +421,102 @@
     padding: 4px 10px;
     font-size: .75rem;
     font-weight: 600;
-    color: var(--atp-primary, #2563eb);
-    border: 1px solid var(--atp-primary, #2563eb);
+    color: var(--atp-primary, #1d4ed8);
+    border: 1px solid var(--atp-primary, #1d4ed8);
     border-radius: var(--atp-radius, 8px);
     text-decoration: none;
     transition: background .15s, color .15s;
     white-space: nowrap;
 }
 .atp-dieline-btn-small:hover {
-    background: var(--atp-primary, #2563eb);
+    background: var(--atp-primary, #1d4ed8);
     color: #fff;
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   PACKAGING INDEX PAGE (/packaging)
+   PRODUTOS PAGE (/produtos)
    ══════════════════════════════════════════════════════════════════ */
 
 .atp-pkg-hero {
-    padding: 64px 0 40px;
-    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-    border-bottom: 1px solid #bae6fd;
+    padding: 48px 0 32px;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border-bottom: 1px solid #bfdbfe;
 }
 .atp-pkg-hero__title {
-    font-size: 2.4rem;
+    font-size: 2.2rem;
     font-weight: 800;
     color: #0f172a;
-    margin-bottom: 10px;
+    margin: 8px 0 0;
 }
-.atp-pkg-hero__sub {
-    font-size: 1.1rem;
-    color: #475569;
-    margin: 0;
+
+.atp-pkg-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: .875rem;
+    color: #1d4ed8;
+    text-decoration: none;
+    margin-bottom: 8px;
+}
+.atp-pkg-back:hover {
+    text-decoration: underline;
+    color: #1e40af;
 }
 
 .atp-pkg-grid-section {
-    padding: 56px 0 72px;
+    padding: 48px 0 64px;
 }
 .atp-pkg-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 24px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+    align-items: stretch;
 }
 
 .atp-pkg-card {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 14px;
-    padding: 28px 24px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 20px;
+    min-height: 72px;
     background: #fff;
     border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.05);
     text-decoration: none;
-    color: inherit;
-    transition: border-color .18s, box-shadow .18s, transform .18s;
-    position: relative;
+    color: #0f172a;
+    transition: border-color .15s, box-shadow .15s, background .15s, color .15s;
 }
 .atp-pkg-card:hover {
-    border-color: #2563eb;
-    box-shadow: 0 6px 24px rgba(37,99,235,.14);
-    transform: translateY(-3px);
-    color: inherit;
+    border-color: #1d4ed8;
+    background: #1d4ed8;
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(29,78,216,.18);
     text-decoration: none;
 }
-.atp-pkg-card__icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 12px;
-    background: #eff6ff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #2563eb;
-    flex-shrink: 0;
-}
-.atp-pkg-card:hover .atp-pkg-card__icon {
-    background: #2563eb;
+.atp-pkg-card:hover .atp-pkg-card__arrow {
     color: #fff;
-}
-.atp-pkg-card__body {
-    flex: 1;
+    transform: translateX(3px);
 }
 .atp-pkg-card__name {
-    font-size: 1.15rem;
-    font-weight: 700;
-    color: #0f172a;
-    margin: 0 0 6px;
-}
-.atp-pkg-card__desc {
-    font-size: .875rem;
-    color: #64748b;
+    font-size: 1rem;
+    font-weight: 600;
     margin: 0;
-    line-height: 1.5;
+    line-height: 1.3;
 }
 .atp-pkg-card__arrow {
-    position: absolute;
-    top: 28px;
-    right: 24px;
-    color: #cbd5e1;
-    transition: color .18s, transform .18s;
+    color: #93c5fd;
+    flex-shrink: 0;
+    margin-left: 12px;
+    transition: color .15s, transform .15s;
 }
-.atp-pkg-card:hover .atp-pkg-card__arrow {
-    color: #2563eb;
-    transform: translateX(4px);
+
+/* Esconder filmstrip de categorias do Odoo no shop */
+.o_wsale_filmstip_container {
+    display: none !important;
 }
 
 @media (max-width: 576px) {
-    .atp-pkg-hero__title { font-size: 1.7rem; }
-    .atp-pkg-grid { grid-template-columns: 1fr; }
+    .atp-pkg-hero__title { font-size: 1.6rem; }
+    .atp-pkg-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
 }

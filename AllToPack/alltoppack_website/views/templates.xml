@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
-    <!-- Redireciona o item "Shop" do menu para /packaging -->
+    <!-- Redireciona o item "Shop" do menu para /produtos -->
     <record id="website_sale.menu_shop" model="website.menu">
-        <field name="url">/packaging</field>
+        <field name="url">/produtos</field>
     </record>
 
     <!-- ============================================================
@@ -20,7 +20,7 @@
                         <p class="atp-hero__subtitle">
                             Soluções completas em embalagem para o seu negócio.
                         </p>
-                        <a href="/packaging" class="btn atp-btn-primary atp-btn-primary--lg mt-3">
+                        <a href="/produtos" class="btn atp-btn-primary atp-btn-primary--lg mt-3">
                             Ver Produtos
                         </a>
                     </div>
@@ -72,7 +72,7 @@
                     <div class="container">
                         <h2 class="atp-section-title text-center mb-4">Produtos em Destaque</h2>
                         <div class="text-center mt-4">
-                            <a href="/packaging" class="btn atp-btn-secondary">
+                            <a href="/produtos" class="btn atp-btn-secondary">
                                 Ver todos os produtos
                             </a>
                         </div>

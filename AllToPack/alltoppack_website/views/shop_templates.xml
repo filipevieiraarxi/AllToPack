@@ -39,49 +39,59 @@
             <attribute name="t-attf-class">#{'o_wsale_layout_list' if layout_mode == 'list' else ''} col-lg-9</attribute>
         </xpath>
 
-        <!-- BoxFinder card — antes das categorias no sidebar -->
+        <!-- BoxFinder card — antes das categorias no sidebar.
+             Exclusivo da categoria "Caixas": filtrar por L/W/H não faz sentido
+             noutras categorias (Sacos, Etiquetas…) nem na loja geral. -->
         <xpath expr="//div[@t-if='opt_wsale_categories']" position="before">
-            <div class="atp-sidebar-card atp-boxfinder mb-3">
-                <div class="atp-sidebar-card__title">
-                    <i class="fa fa-search me-1"/>BoxFinder
-                </div>
-                <p class="atp-sidebar-card__sub">
-                    Enter the dimensions of your product and see all the available boxes.
-                </p>
-                <label class="atp-bf-label">Dimensions</label>
-                <div class="atp-bf-dims-row">
-                    <div class="atp-bf-dim">
-                        <input type="number" id="atp-bf-l" placeholder="L" min="1" aria-label="Length"/>
-                        <span class="atp-bf-unit">mm</span>
+            <t t-if="category and category.name == 'Caixas'">
+                <div class="atp-sidebar-card atp-boxfinder mb-3">
+                    <div class="atp-sidebar-card__title">
+                        <i class="fa fa-search me-1"/>BoxFinder
                     </div>
-                    <div class="atp-bf-dim">
-                        <input type="number" id="atp-bf-w" placeholder="W" min="1" aria-label="Width"/>
-                        <span class="atp-bf-unit">mm</span>
+                    <p class="atp-sidebar-card__sub">
+                        Enter the dimensions of your product and see all the available boxes.
+                    </p>
+                    <label class="atp-bf-label">Dimensions</label>
+                    <div class="atp-bf-dims-row">
+                        <div class="atp-bf-dim">
+                            <input type="number" id="atp-bf-l" placeholder="L" min="1" aria-label="Length"/>
+                            <span class="atp-bf-unit">mm</span>
+                        </div>
+                        <div class="atp-bf-dim">
+                            <input type="number" id="atp-bf-w" placeholder="W" min="1" aria-label="Width"/>
+                            <span class="atp-bf-unit">mm</span>
+                        </div>
+                        <div class="atp-bf-dim">
+                            <input type="number" id="atp-bf-h" placeholder="H" min="1" aria-label="Height"/>
+                            <span class="atp-bf-unit">mm</span>
+                        </div>
                     </div>
-                    <div class="atp-bf-dim">
-                        <input type="number" id="atp-bf-h" placeholder="H" min="1" aria-label="Height"/>
-                        <span class="atp-bf-unit">mm</span>
+                    <button id="atp-bf-find" class="atp-bf-btn mt-3">Find Boxes</button>
+                    <button id="atp-bf-reset" class="atp-bf-btn atp-bf-btn--reset mt-1" style="display:none">
+                        <i class="fa fa-times me-1"/>Clear filter
+                    </button>
+                    <div id="atp-bf-noresult" class="atp-bf-noresult" style="display:none">
+                        No matching boxes found.
                     </div>
                 </div>
-                <button id="atp-bf-find" class="atp-bf-btn mt-3">Find Boxes</button>
-                <button id="atp-bf-reset" class="atp-bf-btn atp-bf-btn--reset mt-1" style="display:none">
-                    <i class="fa fa-times me-1"/>Clear filter
-                </button>
-                <div id="atp-bf-noresult" class="atp-bf-noresult" style="display:none">
-                    No matching boxes found.
-                </div>
-            </div>
+            </t>
         </xpath>
 
-        <!-- Substitui o price range pelo card "Looking for a different box model?" -->
-        <xpath expr="//t[@t-call='website_sale.filter_products_price']" position="replace">
-            <div class="atp-sidebar-card atp-sidebar-contact mt-3">
-                <div class="atp-sidebar-card__title">
-                    <i class="fa fa-question-circle me-1"/>Looking for a different box model?
+        <!-- Na categoria "Caixas", substitui o price range pelo card de contacto.
+             Nas outras categorias / loja geral, mantém o price range original. -->
+        <xpath expr="//t[@t-call='website_sale.filter_products_price']" position="before">
+            <t t-if="category and category.name == 'Caixas'">
+                <div class="atp-sidebar-card atp-sidebar-contact mt-3">
+                    <div class="atp-sidebar-card__title">
+                        <i class="fa fa-question-circle me-1"/>Looking for a different box model?
+                    </div>
+                    <p class="atp-sidebar-card__sub">Let us know what you need.</p>
+                    <a href="/contactus" class="atp-contact-btn">Request now</a>
                 </div>
-                <p class="atp-sidebar-card__sub">Let us know what you need.</p>
-                <a href="/contactus" class="atp-contact-btn">Request now</a>
-            </div>
+            </t>
+        </xpath>
+        <xpath expr="//t[@t-call='website_sale.filter_products_price']" position="attributes">
+            <attribute name="t-if">opt_wsale_filter_price and opt_wsale_attributes and not (category and category.name == 'Caixas')</attribute>
         </xpath>
 
     </template>

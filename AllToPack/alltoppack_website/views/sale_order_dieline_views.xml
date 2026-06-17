@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- ── Form view de sale.order.dieline (SVG preview + download) ── -->
+    <record id="sale_order_dieline_form" model="ir.ui.view">
+        <field name="name">sale.order.dieline.form</field>
+        <field name="model">sale.order.dieline</field>
+        <field name="arch" type="xml">
+            <form string="Dieline da Encomenda">
+                <sheet>
+                    <group>
+                        <group>
+                            <field name="product_id" readonly="1"/>
+                            <field name="box_type" readonly="1"/>
+                        </group>
+                        <group>
+                            <field name="box_l" string="L (mm)" readonly="1"/>
+                            <field name="box_w" string="W (mm)" readonly="1"/>
+                            <field name="box_h" string="H (mm)" readonly="1"/>
+                        </group>
+                    </group>
+                    <div class="d-flex gap-2 mb-3">
+                        <button name="action_download_svg_front" type="object"
+                                string="Descarregar SVG Frente" icon="fa-download"
+                                class="btn btn-sm btn-primary"/>
+                        <button name="action_download_svg_back" type="object"
+                                string="Descarregar SVG Verso" icon="fa-download"
+                                class="btn btn-sm btn-secondary"/>
+                        <!-- Ver Dieline 3D — comentado, pode ser necessário mais tarde
+                        <button name="action_open_preview" type="object"
+                                string="Ver Dieline 3D" icon="fa-cube"
+                                class="btn btn-sm btn-outline-primary"/>
+                        -->
+                    </div>
+                    <notebook>
+                        <page string="SVG Frente" name="svg_front_page">
+                            <field name="svg_front_html" readonly="1" nolabel="1"/>
+                        </page>
+                        <page string="SVG Verso" name="svg_back_page">
+                            <field name="svg_back_html" readonly="1" nolabel="1"/>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- ── Tab Dieline na sale.order ── -->
+    <record id="sale_order_form_dieline_tab" model="ir.ui.view">
+        <field name="name">sale.order.form.dieline.tab</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//page[@name='other_information']" position="after">
+                <page string="Dieline" name="atp_dieline"
+                      invisible="not dieline_config_ids">
+                    <field name="dieline_config_ids" nolabel="1" readonly="1">
+                        <list string="Configurações Dieline">
+                            <field name="product_id" string="Produto"/>
+                            <field name="box_type" string="Tipo"/>
+                            <field name="box_l" string="L (mm)" digits="[6,0]"/>
+                            <field name="box_w" string="W (mm)" digits="[6,0]"/>
+                            <field name="box_h" string="H (mm)" digits="[6,0]"/>
+                            <button name="action_open_svg" type="object"
+                                    string="Ver SVG" icon="fa-file-image-o"
+                                    class="btn-sm btn-outline-secondary"/>
+                        </list>
+                    </field>
+                </page>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

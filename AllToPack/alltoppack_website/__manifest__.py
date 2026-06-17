@@ -9,6 +9,7 @@
     'depends': [
         'website',
         'website_sale',
+        'sale',
     ],
     'data': [
         'security/ir.model.access.csv',
@@ -18,6 +19,7 @@
         'views/product_templates.xml',
         'views/dieline_templates.xml',
         'views/product_backend_views.xml',
+        'views/sale_order_dieline_views.xml',
         'data/product_data.xml',
     ],
     'assets': {

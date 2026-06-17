@@ -31,15 +31,19 @@
     position: relative;
     flex: 1;
     overflow: hidden;
-    background: #ffffff;
+    /* fundo neutro suave (slate-50) para o canvas contido respirar */
+    background: #f1f5f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-/* Canvas: Three.js controla width/height via setSize — sem CSS fixo */
+/* Canvas: Three.js controla width/height via setSize. Centrado no viewer
+   (margem à volta) com cantos suaves e sombra ligeira — look mais contido. */
 .atp-dl-canvas3d {
     display: block;
-    position: absolute;
-    top: 0;
-    left: 0;
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, .18);
 }
 
 .atp-dl-2dview {
@@ -56,6 +60,47 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
+}
+
+/* ── Vista 2D Logo ─────────────────────────────────────────────── */
+.atp-dl-logo2d-view {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: #f8fafc;
+    overflow: hidden;
+}
+
+.atp-logo2d-toolbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 14px;
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    z-index: 2;
+}
+
+.atp-logo2d-canvas-wrap {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+}
+
+.atp-logo2d-canvas {
+    display: block;
+    /* tamanho controlado por JS */
+    image-rendering: crisp-edges;
+    border-radius: 4px;
+    box-shadow: 0 4px 20px rgba(15,23,42,.12);
+    background: #fff;
+    cursor: crosshair;
 }
 
 /* Floating labels inside the viewer */
@@ -95,9 +140,19 @@
     flex-direction: column;
     gap: 10px;
     overflow-y: auto;
-    padding: 12px 10px;
+    /* Padding assimétrico: mais à DIREITA que à esquerda → o bloco de cards
+       desloca-se para a esquerda (~30%), em vez de centrado. */
+    padding: 12px 120px 12px 24px;
     background: #f1f5f9;
     border-left: 1px solid #e2e8f0;
+}
+
+/* Cards com largura máxima, alinhados à esquerda do espaço da sidebar */
+.atp-dl-sidebar > .atp-scard {
+    width: 100%;
+    max-width: 430px;
+    margin-left: 0;
+    margin-right: auto;
 }
 
 /* ── CARDS ────────────────────────────────────────────────────────── */
@@ -132,7 +187,7 @@
 .atp-scard-header:hover { color: #1e293b; }
 .atp-scard-header .fa:first-child {
     font-size: 14px;
-    color: #2563eb;
+    color: #1d4ed8;
     width: 18px;
     text-align: center;
     flex-shrink: 0;
@@ -191,7 +246,7 @@
 .atp-dim-field input[type="number"]:focus,
 .atp-qty-val:focus {
     outline: none;
-    border-color: #2563eb;
+    border-color: #1d4ed8;
     background: #fff;
 }
 .atp-dim-unit {
@@ -214,14 +269,14 @@
     font-weight: 700;
     border: none;
     border-radius: 7px;
-    background: #2563eb;
+    background: #1d4ed8;
     color: #fff;
     cursor: pointer;
     transition: background .15s;
     text-decoration: none;
     letter-spacing: .02em;
 }
-.atp-scard-btn:hover { background: #1d4ed8; color: #fff; }
+.atp-scard-btn:hover { background: #1e40af; color: #fff; }
 
 /* Small info text */
 .atp-scard-info {
@@ -260,10 +315,10 @@
 .atp-radio-tile-inner strong { font-size: 12px; color: #1e293b; line-height: 1.2; }
 .atp-radio-tile-inner small  { font-size: 10px; color: #94a3b8; }
 .atp-radio-tile input:checked + .atp-radio-tile-inner {
-    border-color: #2563eb;
+    border-color: #1d4ed8;
     background: #eff6ff;
 }
-.atp-radio-tile input:checked + .atp-radio-tile-inner strong { color: #1d4ed8; }
+.atp-radio-tile input:checked + .atp-radio-tile-inner strong { color: #1e40af; }
 
 /* ── QUANTITY PACKLY-STYLE ────────────────────────────────────────── */
 .atp-scard-summary {
@@ -346,8 +401,8 @@
 }
 .atp-tier:hover { border-color: #94a3b8; background: #f1f5f9; }
 .atp-tier--active {
-    border-color: #16a34a;
-    background: #f0fdf4;
+    border-color: #3b82f6;
+    background: #eff6ff;
 }
 .atp-tier-qty {
     font-size: 12px;
@@ -355,13 +410,13 @@
     color: #1e293b;
     line-height: 1.2;
 }
-.atp-tier--active .atp-tier-qty { color: #15803d; }
+.atp-tier--active .atp-tier-qty { color: #2563eb; }
 .atp-tier-price {
     font-size: 11px;
     color: #64748b;
     line-height: 1.1;
 }
-.atp-tier--active .atp-tier-price { color: #16a34a; font-weight: 700; }
+.atp-tier--active .atp-tier-price { color: #3b82f6; font-weight: 700; }
 
 /* Locked tier (guest users) */
 .atp-tier--locked {
@@ -410,36 +465,36 @@
 }
 .atp-delivery-option:hover { border-color: #94a3b8; background: #f1f5f9; }
 .atp-delivery-option--active {
-    border-color: #16a34a;
-    background: #f0fdf4;
+    border-color: #3b82f6;
+    background: #eff6ff;
 }
 .atp-delivery-icon {
     font-size: 18px;
     color: #94a3b8;
 }
-.atp-delivery-option--active .atp-delivery-icon { color: #16a34a; }
+.atp-delivery-option--active .atp-delivery-icon { color: #3b82f6; }
 .atp-delivery-label {
     font-size: 12px;
     font-weight: 700;
     color: #1e293b;
 }
-.atp-delivery-option--active .atp-delivery-label { color: #15803d; }
+.atp-delivery-option--active .atp-delivery-label { color: #2563eb; }
 .atp-delivery-date {
     font-size: 11px;
     color: #64748b;
 }
-.atp-delivery-option--active .atp-delivery-date { color: #16a34a; font-weight: 600; }
+.atp-delivery-option--active .atp-delivery-date { color: #3b82f6; font-weight: 600; }
 .atp-delivery-shipping {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 9px 12px;
-    background: #f0fdf4;
-    border: 1px solid #bbf7d0;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
     border-radius: 8px;
     font-size: 12px;
     font-weight: 600;
-    color: #15803d;
+    color: #2563eb;
 }
 
 /* Checkbox rows */
@@ -454,7 +509,7 @@
     cursor: pointer;
 }
 .atp-check-row:last-child { border-bottom: none; padding-bottom: 0; }
-.atp-check-row input { accent-color: #2563eb; width: 15px; height: 15px; }
+.atp-check-row input { accent-color: #1d4ed8; width: 15px; height: 15px; }
 
 /* Artwork face row */
 .atp-artwork-face-row {
@@ -466,7 +521,7 @@
     border-radius: 6px;
     margin-bottom: 8px;
     font-size: 12px;
-    color: #1d4ed8;
+    color: #1e40af;
 }
 .atp-artwork-face-row strong { flex: 1; font-size: 12px; }
 .atp-artwork-remove-btn {
@@ -488,7 +543,7 @@
     background: #f1f5f9;
     border: 1px solid #cbd5e1;
     border-radius: 5px;
-    color: #1d4ed8;
+    color: #1e40af;
     cursor: pointer;
     padding: 4px 10px;
     font-size: 14px;
@@ -517,15 +572,15 @@
 
 /* ── ORDER CARD ───────────────────────────────────────────────────── */
 .atp-scard--order {
-    border-color: #86efac;
-    background: #f0fdf4;
+    border-color: #bfdbfe;
+    background: #eff6ff;
 }
 .atp-scard--order .atp-scard-header {
-    background: #dcfce7;
-    border-bottom-color: #86efac;
-    color: #15803d;
+    background: #dbeafe;
+    border-bottom-color: #bfdbfe;
+    color: #2563eb;
 }
-.atp-scard--order .atp-scard-header .fa { color: #16a34a; }
+.atp-scard--order .atp-scard-header .fa { color: #3b82f6; }
 .atp-scard--order .atp-scard-body { padding: 14px; }
 .atp-order-price {
     display: flex;
@@ -599,21 +654,21 @@
     border-color: #94a3b8;
 }
 .atp-ctrl.active {
-    background: #2563eb;
+    background: #1d4ed8;
     color: #fff;
-    border-color: #2563eb;
+    border-color: #1d4ed8;
 }
-.atp-ctrl.active:hover { background: #1d4ed8; }
+.atp-ctrl.active:hover { background: #1e40af; }
 
 /* Animation slider */
 .atp-dl-slider {
     width: 100px;
-    accent-color: #2563eb;
+    accent-color: #1d4ed8;
 }
 .atp-dl-pct {
     font-size: 12px;
     font-weight: 700;
-    color: #2563eb;
+    color: #1d4ed8;
     min-width: 34px;
     text-align: right;
 }
@@ -643,7 +698,7 @@
     justify-content: center;
     gap: 8px;
     width: 100%;
-    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
     color: #fff;
     font-weight: 700;
     font-size: 0.95rem;
@@ -651,14 +706,17 @@
     border-radius: 8px;
     padding: 11px 0;
     letter-spacing: 0.02em;
-    box-shadow: 0 2px 8px rgba(22,163,74,0.25);
+    box-shadow: 0 2px 8px rgba(59,130,246,0.25);
     transition: filter 0.15s, box-shadow 0.15s;
     cursor: pointer;
 }
 .atp-btn-addcart:hover {
     filter: brightness(1.08);
-    box-shadow: 0 4px 16px rgba(22,163,74,0.35);
+    box-shadow: 0 4px 16px rgba(59,130,246,0.35);
     color: #fff;
     text-decoration: none;
 }
 .atp-btn-addcart:active { filter: brightness(0.95); }
+
+/* Mensagem de sucesso (ex.: "Guardado!") — azul em vez do verde Bootstrap */
+.atp-text-ok { color: #1d4ed8 !important; font-weight: 600; }
