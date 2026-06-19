@@ -5,33 +5,31 @@ from odoo import fields, models
 class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
-    # box_type é apenas um rótulo/categoria informativa do produto.
-    # NÃO determina a geometria 3D — essa é derivada do box_dieline_svg.
     box_type = fields.Selection(
         selection=[
-            ('rollover_hinged_lid', 'Rollover Hinged Lid'),
-            ('rsc_regular_slotted', 'RSC Regular Slotted Container'),
+            ('FEFCO_0201', 'FEFCO 0201'),
+            ('FEFCO_0200', 'FEFCO 0200'),
+            ('FEFCO_0427', 'FEFCO 0427'),
+            ('FEFCO_04XX', 'FEFCO 04XX'),
+            ('GENERIC',    'Generic'),
         ],
-        string='Tipo de Caixa',
-        default='rollover_hinged_lid',
+        string='Box Type (FEFCO)',
+        default='GENERIC',
     )
     box_l = fields.Float('Comprimento (mm)', default=120.0)
     box_w = fields.Float('Largura (mm)', default=80.0)
     box_h = fields.Float('Altura (mm)', default=100.0)
 
-    # SVG-dieline anotado: é a ÚNICA fonte da geometria 3D.
-    # O engine lê painéis (<rect ..._panel>) e dobras (<line>) e infere a árvore.
     box_dieline_svg = fields.Binary(
         string='Dieline SVG',
         attachment=True,
-        help='SVG-dieline anotado: cada face é um <rect id="..._panel"> em '
-             '#cut_lines e cada dobra uma <line> em #fold_lines. Marque a base '
-             'com data-root="1" e o ângulo de cada dobra com data-fold-angle. '
-             'O motor 3D deriva toda a geometria deste ficheiro.',
+        help='SVG-dieline Format B: <g id="root_group"> com linhas coloridas. '
+             'Vermelho=corte, Azul=vinco, Verde=dimensões (ignorado). '
+             'O motor 3D deriva toda a geometria deste ficheiro via DCEL.',
     )
     box_dieline_svg_fname = fields.Char(string='Nome do ficheiro SVG')
     box_artwork = fields.Text(string='Artwork JSON', default='{}',
-        help='JSON dict {face_key: base64_data_url} com as imagens aplicadas a cada face.')
+        help='JSON dict com as imagens aplicadas a cada face.')
 
     card_image_normal = fields.Binary(
         string='Imagem do Card (normal)',

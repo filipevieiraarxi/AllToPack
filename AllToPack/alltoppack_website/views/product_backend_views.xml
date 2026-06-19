@@ -11,7 +11,7 @@
                 <page string="Dieline 3D" name="dieline_3d">
                     <group>
                         <group string="Tipo e Dimensões">
-                            <field name="box_type"/>
+                            <field name="box_type" string="Tipo de Caixa (FEFCO)"/>
                             <field name="box_l" string="Comprimento L (mm)"/>
                             <field name="box_w" string="Largura W (mm)"/>
                             <field name="box_h" string="Altura H (mm)"/>
@@ -26,18 +26,15 @@
                                    string="Imagem hover"/>
                             <field name="card_image_hover_fname" invisible="1"/>
                         </group>
-                        <group string="SVG de Dieline">
+                        <group string="SVG de Dieline" colspan="2">
                             <field name="box_dieline_svg" widget="binary"
                                    filename="box_dieline_svg_fname"
-                                   string="Ficheiro SVG anotado"/>
-                            <field name="box_dieline_svg_fname" invisible="1"/>
+                                   string="Ficheiro SVG"/>
+                            <field name="box_dieline_svg_fname" string="Nome do ficheiro"/>
                             <div class="text-muted small" colspan="2">
-                                Carregue um SVG-dieline anotado: cada face é um
-                                &lt;rect id="..._panel"&gt; em #cut_lines, cada dobra
-                                é uma &lt;line&gt; em #fold_lines. Marque a base com
-                                data-root="1" e o ângulo de cada dobra com
-                                data-fold-angle. O motor 3D deriva toda a geometria
-                                deste ficheiro.
+                                Formato B: SVG com &lt;g id="root_group"&gt; contendo linhas coloridas.
+                                Vermelho (rgb(255,0,0)) = corte · Azul (rgb(0,0,255)) = vinco · Verde = dimensões (ignorado).
+                                O motor 3D constrói a geometria 3D automaticamente via DCEL.
                             </div>
                         </group>
                     </group>

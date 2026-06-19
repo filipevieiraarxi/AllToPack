@@ -376,7 +376,7 @@
             <!-- Config injectada pelo controller -->
             <script>
                 window.ATP_CONFIG = {
-                    boxType: '<t t-esc="box_type"/>',
+                    type: '<t t-esc="box_type"/>',
                     L: <t t-esc="box_l"/>,
                     W: <t t-esc="box_w"/>,
                     H: <t t-esc="box_h"/>,
@@ -393,8 +393,8 @@
             <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"/>
             <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
             <!-- Parser e geradores devem ser carregados antes do engine -->
-            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=2"/>
-            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=53"/>
+            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.3"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=64"/>
 
             <script>
                 (function () {

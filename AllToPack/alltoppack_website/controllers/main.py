@@ -62,12 +62,12 @@ class DielineController(http.Controller):
         """Página do configurador 3D.
 
         O SVG-dieline é SEMPRE o attachment do produto (box_dieline_svg).
-        Não há SVG estático por tipo de caixa: se o produto não tiver SVG,
-        o engine mostra "sem dieline". box_type é apenas um rótulo.
+        box_type (FEFCO code) é passado ao engine para que o TemplateMapper
+        correcto seja aplicado na construção da árvore de dobras.
         """
         values = {
             'product': None,
-            'box_type': '',
+            'box_type': 'GENERIC',
             'box_l': 0,
             'box_w': 0,
             'box_h': 0,
@@ -84,7 +84,7 @@ class DielineController(http.Controller):
                 product = None
             if product and product.exists():
                 values['product'] = product
-                values['box_type'] = product.box_type or ''
+                values['box_type'] = product.box_type or 'GENERIC'
                 values['box_l'] = int(product.box_l) if product.box_l else 0
                 values['box_w'] = int(product.box_w) if product.box_w else 0
                 values['box_h'] = int(product.box_h) if product.box_h else 0
@@ -170,7 +170,7 @@ class DielineController(http.Controller):
             return request.not_found()
         values = {
             'product': rec.product_id or None,
-            'box_type': rec.box_type or '',
+            'box_type': rec.box_type or 'GENERIC',
             'box_l': int(rec.box_l),
             'box_w': int(rec.box_w),
             'box_h': int(rec.box_h),

@@ -1,13 +1,10 @@
 /* ================================================================
-   AllToPack — dieline_engine.js  (v5 — polígonos genéricos)
+   AllToPack — dieline_engine.js  (v6 — 3D Solver genérico por tipo)
 
    A geometria 3D é DERIVADA inteiramente do SVG-dieline do produto:
-   o parser entrega uma árvore de painéis (root → filhos). Cada painel é
-   um POLÍGONO 2D; o engine constrói-o como THREE.Shape e dobra-o sobre a
-   aresta partilhada com o pai. Retângulos são polígonos de 4 pontos, por
-   isso continua a montar as caixas rectangulares como antes.
-
-   Não há lógica específica por tipo de caixa.
+   o parser (+ TemplateMapper) entrega uma árvore de painéis com
+   foldSign e animGroup já calculados por tipo FEFCO. O engine é
+   puramente genérico: não tem lógica específica de caixa.
 
    t=0.0 → planificado (todas as dobras a 0°)
    t=1.0 → montado     (cada painel dobrado ao seu ângulo)
@@ -175,6 +172,7 @@
         var rb = polyBBox(rootNode.points);
         var off = { x: rb.minX, y: rb.minY };
         var baseL = mm(rb.w), baseW = mm(rb.h);
+        var rootArea = polyArea(rootNode.points);
 
         /* SVG (x,y) → cena (X=x, Y=0, Z=y): base no plano XZ (deitada).
            boxGroup é rodado -90° em X para levantar a caixa para a vertical. */
@@ -217,7 +215,23 @@
             node.stackOrder = idx;
         });
 
-        geo.nodes.forEach(function (node) {
+        /* Ordenar nodes em ordem topológica — pai antes de filho.
+           O TemplateMapper pode mudar parentKey, quebrando a ordem original. */
+        var _topoSorted = (function(nodes) {
+            var byKey = {};
+            nodes.forEach(function(n) { byKey[n.key] = n; });
+            var result = [], visited = {};
+            function visit(n) {
+                if (visited[n.key]) return;
+                visited[n.key] = true;
+                if (n.parentKey && byKey[n.parentKey]) visit(byKey[n.parentKey]);
+                result.push(n);
+            }
+            nodes.forEach(function(n) { visit(n); });
+            return result;
+        })(geo.nodes);
+
+        _topoSorted.forEach(function (node) {
             /* Os filhos penduram no FOLDGROUP do pai (para acompanharem a
                dobra do pai). groups[key] = { attach, restWorld }. */
             var parent = node.parentKey ? groups[node.parentKey] : null;
@@ -244,7 +258,7 @@
                 return;
             }
 
-            var built = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color);
+            var built = buildChild(node, parentAttach, off, mm, sceneOf, parent.restWorld, color, rootArea);
             groups[node.key] = built;
         });
 
@@ -268,7 +282,7 @@
        parentAttach:    foldGroup do pai (onde pendurar).
        parentRestWorld: matriz mundial-de-repouso do pai.
        Devolve { attach, restWorld } para os filhos deste nó. */
-    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color) {
+    function buildChild(node, parentAttach, off, mm, sceneOf, parentRestWorld, color, rootArea) {
         var e = node.edge;
         var A = sceneOf({ x: e.x1, y: e.y1 });
         var B = sceneOf({ x: e.x2, y: e.y2 });
@@ -280,6 +294,9 @@
         var nHat = new THREE.Vector3(-uHat.z, 0, uHat.x);
         var cen = polyCentroidScene(node.points, sceneOf);
         if (cen.clone().sub(A).dot(nHat) < 0) nHat.multiplyScalar(-1);
+
+        /* foldSign vem do TemplateMapper no parser — não recalculado aqui. */
+        var foldSign = (node.foldSign !== undefined) ? node.foldSign : -1;
 
         /* restWorld do FILHO (no chão): mapeia o SHAPE (s,d,0) → mundo.
            s → û ; d → n̂. Base ORTONORMAL DIREITA { X=û, Y=n̂, Z=û×n̂ }
@@ -312,6 +329,24 @@
         var mesh = shapeMesh(pts2d, color, node.key, node.stackOrder || 0);
         foldGroup.add(mesh);
 
+        /* DEBUG labels — remover depois */
+        (function() {
+            var cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+            var ctx = cv.getContext('2d');
+            ctx.fillStyle = 'rgba(255,230,0,0.92)'; ctx.fillRect(0,0,256,128);
+            ctx.fillStyle = '#000'; ctx.font = 'bold 56px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(node.key.replace('panel_','p'), 128, 80);
+            var lbl = new THREE.Mesh(
+                new THREE.PlaneGeometry(30, 15),
+                new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, side: THREE.DoubleSide })
+            );
+            var cx = 0, cy = 0;
+            pts2d.forEach(function(p){ cx+=p.x; cy+=p.y; });
+            lbl.position.set(cx/pts2d.length, cy/pts2d.length, 3);
+            lbl.renderOrder = 999;
+            foldGroup.add(lbl);
+        })();
+
         /* Guardar a transformação SVG→local deste painel para uso no logo.
            Também guardamos o ângulo de rotação do referencial local face ao SVG,
            para compensar na rotação do logo ao construir a textura.
@@ -335,27 +370,11 @@
         node._localAngle = localAngle; /* ângulo de rotação do referencial local */
         node._localPts = pts2d.map(function(v) { return { x: v.x, y: v.y }; });
 
-        /* A tampa (lid) e as suas peças (lid_*, roll) dobram POR ÚLTIMO — só
-           depois de todo o resto estar montado. Identificadas pela key. */
-        var isLid = /^lid(_|$)/.test(node.key) || /^roll(_|$)/.test(node.key);
-
-        /* Ordem de SEQUÊNCIA dentro da fase do corpo (independente do depth):
-           seq 0 — flaps de front/back fecham PRIMEIRO (dobram para dentro);
-           seq 1 — paredes left/right fecham por cima DEPOIS.
-           Tudo o resto fica em 0 (mantém o faseamento por depth de sempre). */
-        var seq = 0;
-        if (/^(left|right)(_|$)/.test(node.key)) seq = 1;
-        else if (/^(front|back)_(top|bottom)_flap$/.test(node.key)) seq = 0;
-
-        /* Abas de TOPO/FUNDO de uma caixa SEM lid (ex.: RSC: front_top, left_bottom…).
-           Nestas caixas, primeiro fecha-se o tubo (paredes + glue) e só depois as
-           abas. Marcadas aqui; o faseamento usa o flag só quando não há lid. */
-        var isTopBottom = /_(top|bottom)$/.test(node.key);
-
+        /* animGroup vem do TemplateMapper — não há heurísticas aqui. */
         folds.push({
-            pivot: foldGroup, angle: node.angle, sign: -1,
-            depth: node.depth || 0, isLid: isLid, seq: seq,
-            isTopBottom: isTopBottom,
+            pivot: foldGroup, angle: node.angle, sign: foldSign,
+            depth: node.depth || 0,
+            animGroup: (node.animGroup !== undefined) ? node.animGroup : 0,
         });
 
         return { attach: foldGroup, restWorld: childRestWorld };
@@ -516,6 +535,17 @@
         return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, w: maxX - minX, h: maxY - minY };
     }
 
+    /* shoelace — área assinada em coords SVG (Y-down). */
+    function polySignedArea(pts) {
+        var a = 0;
+        for (var i = 0; i < pts.length; i++) {
+            var p = pts[i], q = pts[(i + 1) % pts.length];
+            a += p.x * q.y - q.x * p.y;
+        }
+        return a / 2;
+    }
+    function polyArea(pts) { return Math.abs(polySignedArea(pts)); }
+
     /* centroide do polígono em coords de CENA, usando sceneOf para o mapeamento correto */
     function polyCentroidScene(points, sceneOf) {
         var sx = 0, sy = 0;
@@ -554,83 +584,33 @@
     var OVERLAP = 0.35;
 
     /* Calcula as janelas de tempo para cada dobra após buildFromGeometry.
-       Chamado uma vez por buildFromGeometry, logo depois de folds ser preenchido.
 
-       SEAMLESS: em vez de fases fixas com gaps (que faziam a animação parar
-       entre grupos), atribuímos a cada dobra uma CHAVE DE ORDEM e depois
-       comprimimos os grupos REALMENTE existentes para fileiras CONSECUTIVAS
-       (rank 0,1,2,…) — sem níveis vazios. As janelas são distribuídas
-       uniformemente em [0,1] com OVERLAP, garantindo que cada grupo começa
-       enquanto o anterior ainda dobra (nunca há um instante sem movimento).
-
-       Ordem desejada (do mais cedo ao mais tarde):
-         CORPO  — por (seq, depth): base → paredes front/back → flaps → left/right
-         TAMPA  — depois do corpo: abas da tampa (depth maior) → lid (depth menor) */
-    var OVERLAP_GROW = 1.6; /* largura da janela = passo · este factor (>1 ⇒ sobreposição) */
+       Usa node.animGroup (vem do TemplateMapper no parser) como chave de ordem.
+       Grupos com animGroup menor dobram primeiro; grupos iguais animam juntos.
+       As janelas são distribuídas uniformemente em [0,1] com OVERLAP para que
+       cada grupo comece enquanto o anterior ainda dobra (animação contínua). */
+    var OVERLAP_GROW = 1.6;
 
     function calcFoldWindows() {
         if (!folds.length) return;
 
-        var hasLid = false;
-        for (var k = 0; k < folds.length; k++) {
-            if (folds[k].isLid) { hasLid = true; break; }
-        }
-
-        /* profundidade máxima do corpo, para compor a chave de ordem. */
-        var maxBodyDepth = 0;
+        /* Comprimir os valores de animGroup em ranks consecutivos 0,1,2,…
+           eliminando gaps (evita pausas entre grupos). */
+        var groups = [];
         for (var i = 0; i < folds.length; i++) {
-            if (!folds[i].isLid) maxBodyDepth = Math.max(maxBodyDepth, folds[i].depth || 0);
+            var g = folds[i].animGroup || 0;
+            if (groups.indexOf(g) === -1) groups.push(g);
         }
-        var BODY_SPAN = (maxBodyDepth + 1);
-
-        /* profundidade máxima da tampa (para inverter: abas antes da lid). */
-        var maxLidDepth = 0;
-        for (var l = 0; l < folds.length; l++) {
-            if (folds[l].isLid) maxLidDepth = Math.max(maxLidDepth, folds[l].depth || 0);
-        }
-
-        /* Chave de ordem global (número crescente = dobra mais tardia). */
-        var BODY_TOTAL = 2 * BODY_SPAN; /* seq 0..1 → largura do bloco "corpo" */
-        function orderKey(f) {
-            if (!f.isLid) {
-                /* Caixa SEM lid (ex.: RSC): regra SIMPLES e robusta — primeiro
-                   TODO o tubo (paredes + glue), por depth (a cadeia fecha em
-                   ordem); só DEPOIS TODAS as abas de topo/fundo, por depth. O
-                   `seq` (lógica left/right do rollover) NÃO se aplica aqui,
-                   senão as abas de left/right separavam-se das de front/back e
-                   a ordem partia-se quando os depths variam (no rebuild). */
-                if (!hasLid) {
-                    var block = f.isTopBottom ? BODY_TOTAL : 0;
-                    return block + (f.depth || 0);
-                }
-                /* Caixa COM lid: corpo por (seq, depth) — left/right por cima. */
-                return (f.seq || 0) * BODY_SPAN + (f.depth || 0);
-            }
-            /* tampa: começa depois de todo o corpo; abas (depth maior) primeiro,
-               lid (depth menor) por último → invertemos o depth. */
-            return BODY_TOTAL + (maxLidDepth - (f.depth || 0));
-        }
-
-        /* Comprimir as chaves distintas em ranks consecutivos 0,1,2,… (sem
-           buracos) — é isto que elimina as pausas entre grupos. */
-        var keys = [];
-        for (var a = 0; a < folds.length; a++) {
-            var kk = orderKey(folds[a]);
-            folds[a]._ok = kk;
-            if (keys.indexOf(kk) === -1) keys.push(kk);
-        }
-        keys.sort(function (x, y) { return x - y; });
+        groups.sort(function (a, b) { return a - b; });
         var rankOf = {};
-        keys.forEach(function (kv, idx) { rankOf[kv] = idx; });
-        var numRanks = keys.length;
+        groups.forEach(function (g, idx) { rankOf[g] = idx; });
+        var numRanks = groups.length;
 
-        /* Distribuição contínua: passo entre ranks e largura de janela (com
-           sobreposição). O último rank termina exactamente em 1. */
         var step = numRanks > 1 ? 1 / (numRanks - 1 + (OVERLAP_GROW - 1)) : 1;
         var winW = step * OVERLAP_GROW;
 
         for (var j = 0; j < folds.length; j++) {
-            var rank = rankOf[folds[j]._ok];
+            var rank = rankOf[folds[j].animGroup || 0];
             var tS = rank * step;
             var tE = tS + winW;
             if (tE > 1) tE = 1;
@@ -1235,6 +1215,8 @@
     ─────────────────────────────────────────────────────────────── */
     var c2logo = null; /* canvas#canvas2dlogo */
     var ctx2logo = null;
+    var _svgBgImage = null;       /* Image com o SVG actual para fundo do canvas 2D Logo */
+    var _svgBgImageSrc = null;    /* src usado para detectar mudanças */
 
     /* Cor do cartão em CSS para o canvas 2D */
     var CARD_FILL   = '#e3d3b8';
@@ -1247,6 +1229,100 @@
        por: ecrãX = panOffX + svgX * panScale * logo2dZoom
        Usa os nodes e as suas arestas do _currentGeo para desenhar os painéis.
     */
+    /* Remove elementos verdes (medidas) do SVG antes de renderizar no canvas.
+       Filtra por cor de stroke/fill que seja verde (#00xx00 / rgb(0,x,0) / "green" etc.)
+       e também por grupos com id que contenha "meas", "dim", "annotation", "ruler". */
+    function stripMeasurementLines(svgText) {
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(svgText, 'image/svg+xml');
+            if (doc.querySelector('parsererror')) return svgText;
+
+            /* Padrão de cor verde: qualquer variante que não seja vermelho (#ff…) nem azul (#…ff) */
+            function isGreenish(color) {
+                if (!color) return false;
+                color = color.toLowerCase().trim();
+                if (color === 'green' || color === 'lime' || color === '#00ff00' || color === '#008000') return true;
+                /* #RRGGBB ou #RGB onde G >> R e G >> B */
+                var m6 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/);
+                if (m6) {
+                    var r = parseInt(m6[1], 16), g = parseInt(m6[2], 16), b = parseInt(m6[3], 16);
+                    return g > 80 && g > r * 2 && g > b * 2;
+                }
+                var m3 = color.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
+                if (m3) {
+                    var r2 = parseInt(m3[1] + m3[1], 16), g2 = parseInt(m3[2] + m3[2], 16), b2 = parseInt(m3[3] + m3[3], 16);
+                    return g2 > 80 && g2 > r2 * 2 && g2 > b2 * 2;
+                }
+                var rgb = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+                if (rgb) {
+                    var rr = +rgb[1], gg = +rgb[2], bb = +rgb[3];
+                    return gg > 80 && gg > rr * 2 && gg > bb * 2;
+                }
+                return false;
+            }
+
+            function shouldRemove(el) {
+                /* Por ID do grupo */
+                var id = (el.id || el.getAttribute('id') || '').toLowerCase();
+                if (/meas|dimen|annot|ruler|arrow|label/.test(id)) return true;
+                /* Por cor do elemento ou do seu grupo pai */
+                var stroke = el.getAttribute('stroke') || '';
+                var fill   = el.getAttribute('fill')   || '';
+                if (isGreenish(stroke) || isGreenish(fill)) return true;
+                /* Ver estilo inline */
+                var style  = el.getAttribute('style')  || '';
+                var sm = style.match(/stroke\s*:\s*([^;]+)/);
+                var fm = style.match(/fill\s*:\s*([^;]+)/);
+                if (sm && isGreenish(sm[1])) return true;
+                if (fm && isGreenish(fm[1])) return true;
+                return false;
+            }
+
+            var toRemove = [];
+            doc.querySelectorAll('g, line, path, polyline, polygon, rect, circle, ellipse, text').forEach(function (el) {
+                if (shouldRemove(el)) toRemove.push(el);
+            });
+            toRemove.forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
+
+            return new XMLSerializer().serializeToString(doc);
+        } catch (e) {
+            return svgText;
+        }
+    }
+
+    /* Constrói (ou reutiliza) a Image do SVG actual para o fundo do canvas 2D Logo.
+       cb(img) é chamado quando a imagem está pronta (pode ser síncrono se já em cache). */
+    function getSvgBgImage(cb) {
+        var svgText = svgTextCache;
+        if (!svgText) { cb(null); return; }
+
+        /* Reutilizar se já foi carregado com o mesmo conteúdo */
+        if (_svgBgImage && _svgBgImageSrc === svgText) {
+            cb(_svgBgImage);
+            return;
+        }
+
+        var cleanSvg = stripMeasurementLines(svgText);
+        /* Usar data-URL para evitar restrições CORS no drawImage */
+        var encoded = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cleanSvg);
+        var img = new Image();
+        img.onload = function () {
+            if (_svgBgImageSrc !== svgText) { cb(null); return; }
+            _svgBgImage    = img;
+            cb(img);
+        };
+        img.onerror = function () { cb(null); };
+        _svgBgImageSrc = svgText;
+        img.src = encoded;
+    }
+
+    /* Invalida a cache da imagem SVG de fundo (chamar quando o SVG muda). */
+    function invalidateSvgBgCache() {
+        _svgBgImage    = null;
+        _svgBgImageSrc = null;
+    }
+
     function render2dLogo() {
         if (!c2logo || !ctx2logo) return;
         syncLegacy(); /* garantir que as vars legadas reflectem o lado activo */
@@ -1254,15 +1330,32 @@
         ctx2logo.clearRect(0, 0, cw, ch);
         if (!_currentGeo || !_currentGeo.nodes || !_currentGeo.nodes.length) return;
 
-        /* Calcular bbox total do dieline (todos os pontos) */
-        var allMinX = Infinity, allMinY = Infinity, allMaxX = -Infinity, allMaxY = -Infinity;
-        _currentGeo.nodes.forEach(function (node) {
-            node.points.forEach(function (p) {
-                allMinX = Math.min(allMinX, p.x); allMinY = Math.min(allMinY, p.y);
-                allMaxX = Math.max(allMaxX, p.x); allMaxY = Math.max(allMaxY, p.y);
+        /* Calcular bbox do dieline a partir do SVG viewBox (se disponível) ou dos nodes */
+        var svgVB = null;
+        if (svgTextCache) {
+            var vbMatch = svgTextCache.match(/viewBox\s*=\s*["']([^"']+)["']/);
+            if (vbMatch) {
+                var parts = vbMatch[1].trim().split(/[\s,]+/).map(Number);
+                if (parts.length === 4 && !parts.some(isNaN)) {
+                    svgVB = { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+                }
+            }
+        }
+        var dlW, dlH, allMinX, allMinY;
+        if (svgVB) {
+            allMinX = svgVB.x; allMinY = svgVB.y;
+            dlW = svgVB.w; dlH = svgVB.h;
+        } else {
+            allMinX = Infinity; allMinY = Infinity;
+            var allMaxX = -Infinity, allMaxY = -Infinity;
+            _currentGeo.nodes.forEach(function (node) {
+                node.points.forEach(function (p) {
+                    allMinX = Math.min(allMinX, p.x); allMinY = Math.min(allMinY, p.y);
+                    allMaxX = Math.max(allMaxX, p.x); allMaxY = Math.max(allMaxY, p.y);
+                });
             });
-        });
-        var dlW = allMaxX - allMinX || 1, dlH = allMaxY - allMinY || 1;
+            dlW = allMaxX - allMinX || 1; dlH = allMaxY - allMinY || 1;
+        }
 
         /* Escala base (fit no canvas com margem) */
         var MARGIN = 40;
@@ -1275,7 +1368,7 @@
         var offY = (ch - dlH * scale) / 2 + logo2dPan.y;
         logo2dOffMM = { x: allMinX - offX / scale, y: allMinY - offY / scale };
 
-        /* Transformação SVG px → canvas px (sem espelho — igual para frente e verso) */
+        /* Transformação SVG px → canvas px */
         function tx(svgX) { return offX + (svgX - allMinX) * scale; }
         function ty(svgY) { return offY + (svgY - allMinY) * scale; }
 
@@ -1283,80 +1376,77 @@
         ctx2logo.fillStyle = '#f8fafc';
         ctx2logo.fillRect(0, 0, cw, ch);
 
-        /* Desenhar cada painel */
-        _currentGeo.nodes.forEach(function (node) {
-            var pts = node.points;
-            if (!pts || pts.length < 2) return;
-            ctx2logo.beginPath();
-            ctx2logo.moveTo(tx(pts[0].x), ty(pts[0].y));
-            for (var i = 1; i < pts.length; i++) ctx2logo.lineTo(tx(pts[i].x), ty(pts[i].y));
-            ctx2logo.closePath();
-            ctx2logo.fillStyle = CARD_FILL;
-            ctx2logo.fill();
-            ctx2logo.strokeStyle = CUT_COLOR;
-            ctx2logo.lineWidth = 1.5;
-            ctx2logo.stroke();
-        });
-
-        /* Linhas de dobra (aresta de dobra de cada nó filho) */
-        _currentGeo.nodes.forEach(function (node) {
-            if (!node.edge) return;
-            ctx2logo.beginPath();
-            ctx2logo.moveTo(tx(node.edge.x1), ty(node.edge.y1));
-            ctx2logo.lineTo(tx(node.edge.x2), ty(node.edge.y2));
-            ctx2logo.strokeStyle = FOLD_COLOR;
-            ctx2logo.lineWidth = 1.5;
-            ctx2logo.setLineDash([6, 4]);
-            ctx2logo.stroke();
-            ctx2logo.setLineDash([]);
-        });
-
-        /* Labels das faces — comentado para não confundir o utilizador
-        _currentGeo.nodes.forEach(function (node) {
-            var pts = node.points;
-            if (!pts || !pts.length) return;
-            var cx = 0, cy = 0;
-            pts.forEach(function (p) { cx += p.x; cy += p.y; });
-            cx /= pts.length; cy /= pts.length;
-            var label = node.key.replace(/_/g, ' ');
-            ctx2logo.fillStyle = '#64748b';
-            ctx2logo.font = Math.max(8, Math.round(scale * 8)) + 'px sans-serif';
-            ctx2logo.textAlign = 'center';
-            ctx2logo.textBaseline = 'middle';
-            ctx2logo.fillText(label, tx(cx), ty(cy));
-        });
-        */
-
-        /* Logo sobre o dieline */
-        if (logoDataUrl && logoDieline) {
-            var lx = tx(logoDieline.x), ly = ty(logoDieline.y);
-            var u = _currentGeo.unit || 1;
-            var lw = logoSizeMM * u * scale;
-            var imgH2 = lw;
-            if (_logoImg && _logoImg.complete) {
-                imgH2 = lw / (_logoImg.naturalWidth / _logoImg.naturalHeight);
+        /* Dieline: desenhar o SVG original como imagem (igual ao 2D view) */
+        function drawDielineBg(img) {
+            if (img) {
+                ctx2logo.drawImage(img, offX, offY, dlW * scale, dlH * scale);
+            } else {
+                /* Fallback: redesenhar manualmente caso o SVG não esteja disponível */
+                _currentGeo.nodes.forEach(function (node) {
+                    var pts = node.points;
+                    if (!pts || pts.length < 2) return;
+                    ctx2logo.beginPath();
+                    ctx2logo.moveTo(tx(pts[0].x), ty(pts[0].y));
+                    for (var i = 1; i < pts.length; i++) ctx2logo.lineTo(tx(pts[i].x), ty(pts[i].y));
+                    ctx2logo.closePath();
+                    ctx2logo.fillStyle = CARD_FILL;
+                    ctx2logo.fill();
+                    ctx2logo.strokeStyle = CUT_COLOR;
+                    ctx2logo.lineWidth = 1.5;
+                    ctx2logo.stroke();
+                });
+                _currentGeo.nodes.forEach(function (node) {
+                    if (!node.edge) return;
+                    ctx2logo.beginPath();
+                    ctx2logo.moveTo(tx(node.edge.x1), ty(node.edge.y1));
+                    ctx2logo.lineTo(tx(node.edge.x2), ty(node.edge.y2));
+                    ctx2logo.strokeStyle = FOLD_COLOR;
+                    ctx2logo.lineWidth = 1.5;
+                    ctx2logo.setLineDash([6, 4]);
+                    ctx2logo.stroke();
+                    ctx2logo.setLineDash([]);
+                });
             }
-            ctx2logo.save();
-            ctx2logo.translate(lx, ly);
-            ctx2logo.rotate(logoRot * Math.PI / 180);
-            ctx2logo.globalAlpha = 0.9;
-            if (_logoImg && _logoImg.complete) {
-                ctx2logo.drawImage(_logoImg, -lw/2, -imgH2/2, lw, imgH2);
+
+            /* Logo sobre o dieline */
+            if (logoDataUrl && logoDieline) {
+                var lx = tx(logoDieline.x), ly = ty(logoDieline.y);
+                var u = _currentGeo.unit || 1;
+                var lw = logoSizeMM * u * scale;
+                var imgH2 = lw;
+                if (_logoImg && _logoImg.complete) {
+                    imgH2 = lw / (_logoImg.naturalWidth / _logoImg.naturalHeight);
+                }
+                ctx2logo.save();
+                ctx2logo.translate(lx, ly);
+                ctx2logo.rotate(logoRot * Math.PI / 180);
+                ctx2logo.globalAlpha = 0.9;
+                if (_logoImg && _logoImg.complete) {
+                    ctx2logo.drawImage(_logoImg, -lw/2, -imgH2/2, lw, imgH2);
+                }
+                ctx2logo.globalAlpha = 1;
+                /* bounding box do logo */
+                ctx2logo.strokeStyle = '#1d4ed8';
+                ctx2logo.lineWidth = 1.5;
+                ctx2logo.setLineDash([4, 3]);
+                ctx2logo.strokeRect(-lw/2, -imgH2/2, lw, imgH2);
+                ctx2logo.setLineDash([]);
+                /* handle de drag: círculo central */
+                ctx2logo.beginPath();
+                ctx2logo.arc(0, 0, 6, 0, Math.PI * 2);
+                ctx2logo.fillStyle = '#1d4ed8';
+                ctx2logo.fill();
+                ctx2logo.restore();
             }
-            ctx2logo.globalAlpha = 1;
-            /* bounding box do logo */
-            ctx2logo.strokeStyle = '#1d4ed8';
-            ctx2logo.lineWidth = 1.5;
-            ctx2logo.setLineDash([4, 3]);
-            ctx2logo.strokeRect(-lw/2, -imgH2/2, lw, imgH2);
-            ctx2logo.setLineDash([]);
-            /* handle de drag: círculo central */
-            ctx2logo.beginPath();
-            ctx2logo.arc(0, 0, 6, 0, Math.PI * 2);
-            ctx2logo.fillStyle = '#1d4ed8';
-            ctx2logo.fill();
-            ctx2logo.restore();
         }
+
+        getSvgBgImage(function (img) {
+            /* Limpar e redesenhar (assíncrono após carregamento) */
+            ctx2logo.clearRect(0, 0, cw, ch);
+            ctx2logo.fillStyle = '#f8fafc';
+            ctx2logo.fillRect(0, 0, cw, ch);
+            drawDielineBg(img);
+        });
     }
 
     /* Inicializar o canvas 2D Logo e os seus eventos */
@@ -1792,7 +1882,7 @@
         console.log('[dieline] svg_front len=' + svgF.length + ' svg_back len=' + svgB.length + ' geo nodes=' + (_currentGeo ? _currentGeo.nodes.length : 'null'));
         var params = {
             product_id:   _cfg.productId || 0,
-            box_type:     _cfg.boxType   || '',
+            box_type:     _cfg.type      || '',
             box_l:        iL ? parseFloat(iL.value) || _cfg.L : _cfg.L,
             box_w:        iW ? parseFloat(iW.value) || _cfg.W : _cfg.W,
             box_h:        iH ? parseFloat(iH.value) || _cfg.H : _cfg.H,
@@ -1841,138 +1931,15 @@
     window.addEventListener('resize', function () { fitPageHeight(); resizeRenderer(); updateCam(); });
 
 
-    /* ── GERADORES SVG PARAMETRICOS ─────────────────────────────── */
-    var _generators = (function () {
-        function r2(n) { return Math.round(n * 100) / 100; }
-        /* Garante o sufixo _panel SEM duplicar. As chamadas passam o id ora com
-           _panel (ex.: 'lid_panel') ora sem ('front'); normalizamos aqui para o
-           id final terminar EXACTAMENTE em '_panel'. Sem isto gerava-se
-           'front_panel_panel', o parser só removia um '_panel' e as keys ficavam
-           erradas (front_panel em vez de front) — partindo a deteção de flaps/
-           abas/lid no rebuild. */
-        function panelId(id) {
-            return /_panel$/.test(id) ? id : (id + '_panel');
-        }
-        function rect(id, x, y, w, h, extra) {
-            return '<rect id="' + panelId(id) + '" x="' + r2(x) + '" y="' + r2(y) + '" width="' + r2(w) + '" height="' + r2(h) + '" ' + (extra || '') + '/>';
-        }
-        function polygon(id, pts, extra) {
-            var s = pts.map(function (p) { return r2(p.x) + ',' + r2(p.y); }).join(' ');
-            return '<polygon id="' + panelId(id) + '" points="' + s + '" ' + (extra || '') + '/>';
-        }
-        function fline(x1, y1, x2, y2) {
-            return '<line x1="' + r2(x1) + '" y1="' + r2(y1) + '" x2="' + r2(x2) + '" y2="' + r2(y2) + '"/>';
-        }
-        function roundedRightEdge(x, y, w, h, r) {
-            r = Math.min(r, h / 2, w / 2);
-            var pts = [{ x: x, y: y }, { x: x + w - r, y: y }];
-            for (var i = 1; i <= 3; i++) {
-                var a = -Math.PI / 2 + (Math.PI / 2) * (i / 3);
-                pts.push({ x: x + w - r + r * Math.cos(a), y: y + r + r * Math.sin(a) });
-            }
-            for (var j = 0; j <= 3; j++) {
-                var b = (Math.PI / 2) * (j / 3);
-                pts.push({ x: x + w - r + r * Math.cos(b), y: y + h - r + r * Math.sin(b) });
-            }
-            pts.push({ x: x + w - r, y: y + h }, { x: x, y: y + h });
-            return pts;
-        }
-        function buildSvg(vw, vh, boxType, L, W, H, cutLines, foldLines) {
-            var nl = '\n';
-            return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + r2(vw) + ' ' + r2(vh) + '">' + nl +
-                '  <metadata>' + JSON.stringify({ box_type: boxType, length: L, width: W, height: H }) + '</metadata>' + nl +
-                '  <g id="cut_lines" stroke="#ff0000" fill="rgba(245,200,66,0.15)" stroke-width="2">' + nl +
-                cutLines.join(nl) + nl +
-                '  </g>' + nl +
-                '  <g id="fold_lines" stroke="#0000ff" fill="none" stroke-dasharray="6,4" stroke-width="1.5">' + nl +
-                foldLines.join(nl) + nl +
-                '  </g>' + nl +
-                '</svg>';
-        }
-        function rsc(L, W, H) {
-            var G = 30, T = W / 2, mx = 20, my = 20;
-            var x0 = mx + G, x1 = x0 + L, x2 = x1 + W, x3 = x2 + L, x4 = x3 + W;
-            var yTop = my, yWall = my + T, yBot = my + T + H;
-            var cuts = [
-                rect('front_panel',        x0, yWall, L, H, 'data-root="1"'),
-                rect('right_panel',        x1, yWall, W, H, 'data-fold-angle="90"'),
-                rect('back_panel',         x2, yWall, L, H, 'data-fold-angle="90"'),
-                rect('left_panel',         x3, yWall, W, H, 'data-fold-angle="90"'),
-                rect('front_top_panel',    x0, yTop,  L, T, 'data-fold-angle="90"'),
-                rect('right_top_panel',    x1, yTop,  W, T, 'data-fold-angle="90"'),
-                rect('back_top_panel',     x2, yTop,  L, T, 'data-fold-angle="90"'),
-                rect('left_top_panel',     x3, yTop,  W, T, 'data-fold-angle="90"'),
-                rect('front_bottom_panel', x0, yBot,  L, T, 'data-fold-angle="90"'),
-                rect('right_bottom_panel', x1, yBot,  W, T, 'data-fold-angle="90"'),
-                rect('back_bottom_panel',  x2, yBot,  L, T, 'data-fold-angle="90"'),
-                rect('left_bottom_panel',  x3, yBot,  W, T, 'data-fold-angle="90"'),
-                rect('glue_panel',         mx, yWall, G, H, 'data-fold-angle="90"'),
-            ];
-            var folds = [
-                fline(x0, yWall, x0, yBot), fline(x1, yWall, x1, yBot),
-                fline(x2, yWall, x2, yBot), fline(x3, yWall, x3, yBot),
-                fline(x0, yWall, x1, yWall), fline(x1, yWall, x2, yWall),
-                fline(x2, yWall, x3, yWall), fline(x3, yWall, x4, yWall),
-                fline(x0, yBot,  x1, yBot),  fline(x1, yBot,  x2, yBot),
-                fline(x2, yBot,  x3, yBot),  fline(x3, yBot,  x4, yBot),
-            ];
-            return buildSvg(x4 + mx, yBot + T + my, 'rsc_regular_slotted', L, W, H, cuts, folds);
-        }
-        function rolloverHingedLid(L, W, H) {
-            var G = Math.max(10, Math.round(H * 0.3));
-            var ROLL = Math.max(8, Math.round(H * 0.45));
-            var FLAP = H, r = Math.min(10, Math.round(H * 0.2));
-            var mx = 20, my = 20;
-            var xGlue = mx, xFront = xGlue + G, xBase = xFront + H;
-            var xBack = xBase + L, xLid = xBack + H, xRoll = xLid + L, xEnd = xRoll + ROLL;
-            var yTop = my, yWall = my + FLAP, yBot = my + FLAP + W;
-            var cuts = [
-                rect('base_panel',              xBase,  yWall, L,    W,    'data-root="1"'),
-                rect('front_panel',             xFront, yWall, H,    W,    'data-fold-angle="90"'),
-                rect('back_panel',              xBack,  yWall, H,    W,    'data-fold-angle="90"'),
-                rect('left_panel',              xBase,  yTop,  L,    FLAP, 'data-fold-angle="90"'),
-                rect('right_panel',             xBase,  yBot,  L,    FLAP, 'data-fold-angle="90"'),
-                rect('glue_panel',              xGlue,  yWall, G,    W,    'data-fold-angle="90"'),
-                polygon('lid_panel',            roundedRightEdge(xLid, yWall, L, W, r), 'data-fold-angle="90"'),
-                polygon('roll_panel',           roundedRightEdge(xRoll, yWall + r, ROLL, W - 2 * r, r * 0.5), 'data-fold-angle="90"'),
-                rect('front_top_flap_panel',    xFront, yTop,  H,    FLAP, 'data-fold-angle="90"'),
-                rect('front_bottom_flap_panel', xFront, yBot,  H,    FLAP, 'data-fold-angle="90"'),
-                rect('back_top_flap_panel',     xBack,  yTop,  H,    FLAP, 'data-fold-angle="90"'),
-                rect('back_bottom_flap_panel',  xBack,  yBot,  H,    FLAP, 'data-fold-angle="90"'),
-                rect('lid_top_flap_panel',      xLid,   yTop,  L,    FLAP, 'data-fold-angle="90"'),
-                rect('lid_bottom_flap_panel',   xLid,   yBot,  L,    FLAP, 'data-fold-angle="90"'),
-            ];
-            var folds = [
-                fline(xFront, yWall, xFront, yBot), fline(xBase, yWall, xBase, yBot),
-                fline(xBack,  yWall, xBack,  yBot), fline(xLid,  yWall, xLid,  yBot),
-                fline(xRoll,  yWall, xRoll,  yBot),
-                fline(xBase, yWall, xBack, yWall), fline(xBase, yBot, xBack, yBot),
-                fline(xFront, yWall, xBase, yWall), fline(xFront, yBot, xBase, yBot),
-                fline(xBack, yWall, xLid, yWall),  fline(xBack, yBot, xLid, yBot),
-                fline(xLid, yWall, xRoll, yWall),  fline(xLid, yBot, xRoll, yBot),
-            ];
-            return buildSvg(xEnd + mx, yBot + FLAP + my, 'rollover_hinged_lid', L, W, H, cuts, folds);
-        }
-        return {
-            generate: function (boxType, L, W, H) {
-                if (boxType === 'rsc_regular_slotted') return rsc(L, W, H);
-                if (boxType === 'rollover_hinged_lid')  return rolloverHingedLid(L, W, H);
-                return null;
-            },
-        };
-    }());
-
     /* API mínima exposta (debug / testes headless) */
     window.ATP_DIELINE = {
         get scene() { return scene; },
         get folds() { return folds; },
         setFold: function (t) { animT = t; updateFolds(t); },
         rebuild: function (L, W, H) {
-            var svgText = null;
-            if (_cfg.boxType) svgText = _generators.generate(_cfg.boxType, L, W, H);
-            if (!svgText) svgText = svgTextCache;
+            var svgText = svgTextCache;
             if (!svgText) return;
-            var geo = DielineParser.build(svgText);
+            var geo = DielineParser.build(svgText, _cfg.type || 'GENERIC');
             if (!geo.nodes || !geo.nodes.length) return;
             stopAnim(); animT = 0; animDir = 1; updateSlider(0);
             buildFromGeometry(geo);
@@ -2124,7 +2091,8 @@
             .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
             .then(function (text) {
                 svgTextCache = text;
-                var geo = DielineParser.build(text);
+                invalidateSvgBgCache();
+                var geo = DielineParser.build(text, _cfg.type || 'GENERIC');
                 if (!geo.nodes || !geo.nodes.length) { showEmpty('Dieline sem painéis válidos.'); return; }
                 /* Em preview de encomenda as medidas vêm da order (já nos inputs via
                    t-att-value); não sobrescrever com os defaults do SVG do produto. */
