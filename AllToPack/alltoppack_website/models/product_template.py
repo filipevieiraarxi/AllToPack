@@ -8,9 +8,13 @@ class ProductTemplate(models.Model):
     box_type = fields.Selection(
         selection=[
             ('FEFCO_0201', 'FEFCO 0201'),
+            ('FEFCO_0216', 'FEFCO 0216'),
+            ('FEFCO_0215', 'FEFCO 0215'),
             ('FEFCO_0200', 'FEFCO 0200'),
             ('FEFCO_0427', 'FEFCO 0427'),
             ('FEFCO_04XX', 'FEFCO 04XX'),
+            ('FEFCO_0422', 'FEFCO 0422'),
+            ('FEFCO_0425', 'FEFCO 0425'),
             ('GENERIC',    'Generic'),
         ],
         string='Box Type (FEFCO)',

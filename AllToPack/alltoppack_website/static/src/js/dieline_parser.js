@@ -1209,6 +1209,61 @@
         templateFEFCO_0201(nodes);
     }
 
+    /* ── TemplateMapper FEFCO_0216 ────────────────────────────────
+       Igual a 0201 mas ag=1 e ag=2 invertidos: fundo fecha antes do topo. */
+    function templateFEFCO_0216(nodes) {
+        templateFEFCO_0201(nodes);
+        nodes.forEach(function(n) {
+            if (n.animGroup === 1) n.animGroup = 2;
+            else if (n.animGroup === 2) n.animGroup = 1;
+        });
+    }
+
+    /* ── TemplateMapper FEFCO_0215 ────────────────────────────────
+       Igual a 0216 mas p2 é o root — fecha para o lado oposto a p0. */
+    function templateFEFCO_0215(nodes) {
+        templateFEFCO_0216(nodes);
+        var nodeByKey = {};
+        nodes.forEach(function(n) { nodeByKey[n.key] = n; });
+        var p0 = nodeByKey['panel_0'], p2 = nodeByKey['panel_2'];
+        if (p0 && p2) {
+            /* calcular aresta partilhada entre p0 e p2 antes de mudar hierarquia */
+            var sharedEdge = (function(ptsA, ptsB) {
+                var EPS = 4, bestLen = 0, bestEdge = null;
+                for (var i = 0; i < ptsA.length; i++) {
+                    var a1 = ptsA[i], a2 = ptsA[(i+1) % ptsA.length];
+                    var dx = a2.x-a1.x, dy = a2.y-a1.y;
+                    var segLen = Math.sqrt(dx*dx+dy*dy) || 1;
+                    for (var j = 0; j < ptsB.length; j++) {
+                        var b1 = ptsB[j], b2 = ptsB[(j+1) % ptsB.length];
+                        var c1 = Math.abs((b1.x-a1.x)*dy-(b1.y-a1.y)*dx)/segLen;
+                        var c2 = Math.abs((b2.x-a1.x)*dy-(b2.y-a1.y)*dx)/segLen;
+                        if (c1>EPS && c2>EPS) continue;
+                        var t1 = ((b1.x-a1.x)*dx+(b1.y-a1.y)*dy)/(segLen*segLen);
+                        var t2 = ((b2.x-a1.x)*dx+(b2.y-a1.y)*dy)/(segLen*segLen);
+                        var ov = (Math.min(Math.max(t1,t2),1)-Math.max(Math.min(t1,t2),0))*segLen;
+                        if (ov > EPS && ov > bestLen) {
+                            bestLen = ov;
+                            bestEdge = {x1:a1.x,y1:a1.y,x2:a2.x,y2:a2.y};
+                        }
+                    }
+                }
+                return bestEdge;
+            })(p0.points, p2.points);
+
+            /* p2 torna-se root */
+            p2.parentKey = null;
+            p2.edge = null;
+            /* p11 fica filho de p0 — acompanha p0 */
+            /* p0 passa a filho de p2 com a aresta correcta */
+            p0.parentKey = 'panel_2';
+            p0.edge = sharedEdge;
+            p0.angle = 90;
+            p0.foldSign = 1;
+            p0.animGroup = 3;
+        }
+    }
+
     /* ── TemplateMapper FEFCO_04XX ────────────────────────────────
        Família 04XX (caixas telescópicas / display / wrap-around).
        Tampa e corpo são peças separadas geralmente no mesmo SVG.
@@ -1217,12 +1272,317 @@
         templateGeneric(nodes); /* reutilizar lógica genérica */
     }
 
+    /* ── TemplateMapper FEFCO_0422 ────────────────────────────────
+       Caixa de uma peça com half-lids horizontais (landscape).
+       Estrutura:
+         - root: painel base central (L×W)
+         - paredes W: depth=1, eixo vertical, área ~25%
+         - half-lids ×4: depth=1, eixo horizontal, área ~16%
+         - slot-tabs: micro-painéis parasitas (<3%) eliminados
+         - abas pontiagudas: polígono >4 vértices, depth≥2
+
+       animGroup:
+         0  — root + paredes W (depth=1, eixo vertical)
+         2  — tabs (depth≥2, ≤4 vértices)
+         3  — abas pontiagudas (depth≥2, >4 vértices)
+         10 — half-lids / tampas (depth=1, eixo horizontal, área≥12%)
+
+       foldSign = -1 sempre (todas as dobras para dentro).
+    ─────────────────────────────────────────────────────────────── */
+    function templateFEFCO_0422(nodes) {
+        var nodeByKey = {};
+        nodes.forEach(function (n) { nodeByKey[n.key] = n; });
+
+        /* calcular depth */
+        nodes.forEach(function (n) {
+            n._depth = (n.parentKey == null) ? 0
+                     : ((nodeByKey[n.parentKey] || {})._depth || 0) + 1;
+        });
+
+        var rootArea = nodes[0] ? polyArea(nodes[0].points) : 1;
+
+        /* Identificar painéis que têm filhos (para proteger tabs funcionais) */
+        var hasChildren = {};
+        nodes.forEach(function (n) {
+            if (n.parentKey != null) hasChildren[n.parentKey] = true;
+        });
+
+        /* Remover micro-painéis parasitas: área < 3% do root, sem filhos, depth≥1.
+           Estes são criados pelas linhas azuis dos slot-tabs que subdividem
+           os painéis W em faces DCEL indesejadas. */
+        var kept = nodes.filter(function (n) {
+            if (n.parentKey == null) return true; /* nunca remover root */
+            var aRatio = polyArea(n.points) / (rootArea || 1);
+            if (aRatio < 0.03 && !hasChildren[n.key]) return false;
+            return true;
+        });
+        /* Reescrever nodes in-place */
+        nodes.length = 0;
+        kept.forEach(function (n) { nodes.push(n); });
+        /* Reconstruir nodeByKey após filtragem */
+        nodeByKey = {};
+        nodes.forEach(function (n) { nodeByKey[n.key] = n; });
+
+        /* Corrigir arestas de dobra fragmentadas: os painéis W têm múltiplos
+           segmentos azuis paralelos no eixo x=991/2165 — o BFS escolhe um
+           fragmento. Aqui encontramos a aresta de dobra mais longa por eixo:
+           projectamos todos os pontos de ambos os polígonos sobre o eixo do
+           segmento original e usamos o intervalo de sobreposição completo. */
+        function fullSharedEdge(nA, nB) {
+            var ptsA = nA.points, ptsB = nB.points, EPS = 4;
+            var bestLen = 0, bestEdge = null;
+
+            for (var i = 0; i < ptsA.length; i++) {
+                var a1 = ptsA[i], a2 = ptsA[(i + 1) % ptsA.length];
+                var dx = a2.x - a1.x, dy = a2.y - a1.y;
+                var segLen = Math.sqrt(dx*dx + dy*dy) || 1;
+                var ux = dx/segLen, uy = dy/segLen;
+
+                /* Verificar se algum ponto de ptsB está colinear com este segmento */
+                var hasColinear = false;
+                for (var j = 0; j < ptsB.length; j++) {
+                    var b = ptsB[j];
+                    var dist = Math.abs((b.x-a1.x)*dy - (b.y-a1.y)*dx) / segLen;
+                    if (dist < EPS) { hasColinear = true; break; }
+                }
+                if (!hasColinear) continue;
+
+                /* Projectar todos os pontos de ambos os polígonos sobre este eixo
+                   e encontrar o intervalo de sobreposição */
+                var tsA = ptsA.map(function(p) {
+                    return (p.x-a1.x)*ux + (p.y-a1.y)*uy;
+                });
+                var tsB = ptsB.map(function(p) {
+                    var dist = Math.abs((p.x-a1.x)*dy - (p.y-a1.y)*dx) / segLen;
+                    if (dist < EPS) return (p.x-a1.x)*ux + (p.y-a1.y)*uy;
+                    return null;
+                }).filter(function(t) { return t !== null; });
+
+                if (tsB.length === 0) continue;
+
+                var minA = Math.min.apply(null, tsA), maxA = Math.max.apply(null, tsA);
+                var minB = Math.min.apply(null, tsB), maxB = Math.max.apply(null, tsB);
+                var overlapMin = Math.max(minA, minB), overlapMax = Math.min(maxA, maxB);
+                var overlap = overlapMax - overlapMin;
+                if (overlap <= EPS) continue;
+
+                if (overlap > bestLen) {
+                    bestLen = overlap;
+                    var p1 = { x: a1.x + ux*overlapMin, y: a1.y + uy*overlapMin };
+                    var p2 = { x: a1.x + ux*overlapMax, y: a1.y + uy*overlapMax };
+                    /* Orientar para que o centróide de nA fique do lado positivo da normal */
+                    var nx = -uy, ny = ux;
+                    var cen = polyCentroid(nA.points);
+                    var side = (cen.x - p1.x) * nx + (cen.y - p1.y) * ny;
+                    bestEdge = side >= 0
+                        ? { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y }
+                        : { x1: p2.x, y1: p2.y, x2: p1.x, y2: p1.y };
+                }
+            }
+            return bestEdge;
+        }
+
+        nodes.forEach(function (n) {
+            if (n.parentKey == null) return;
+            var parentNode = nodeByKey[n.parentKey];
+            if (!parentNode) return;
+            var better = fullSharedEdge(n, parentNode);
+            if (better) n.edge = better;
+        });
+
+        /* panel_8 e panel_10 estão ligados a panel_3/panel_4 com aresta horizontal
+           em y≈1247 — devem estar ligados a panel_1 (half-lid bottom) exactamente
+           como panel_7/panel_9 estão ligados a panel_2 (half-lid top).
+           Detectar por: filho de panel_3 ou panel_4, cuja aresta é horizontal
+           e partilhada com panel_1. */
+        var p1node = nodeByKey['panel_1'];
+        if (p1node && p1node.edge) {
+            var lidBotY = (p1node.edge.y1 + p1node.edge.y2) / 2;
+            nodes.forEach(function(n) {
+                if (n.parentKey !== 'panel_3' && n.parentKey !== 'panel_4') return;
+                var e = n.edge; if (!e) return;
+                var edgeMidY = (e.y1 + e.y2) / 2;
+                var isHoriz = Math.abs(e.x2 - e.x1) > Math.abs(e.y2 - e.y1);
+                if (!isHoriz) return;
+                if (Math.abs(edgeMidY - lidBotY) > 10) return;
+                /* esta aresta está na junção com panel_1 → reparentar */
+                n.parentKey = 'panel_1';
+                n.edge = fullSharedEdge(n, p1node) || e;
+            });
+        }
+
+        nodes.forEach(function (n) {
+            n.foldSign = -1;
+        });
+
+        var animMap0422 = {
+            'panel_0':  0,
+            'panel_1':  0, 'panel_2':  0,
+            'panel_7':  0, 'panel_9':  0,
+            'panel_8':  0, 'panel_10': 0,
+            'panel_3':  1, 'panel_4':  1,
+            'panel_11': 1, 'panel_12': 1,
+            'panel_5':  1, 'panel_6':  1,
+        };
+        nodes.forEach(function(n) {
+            n.animGroup = animMap0422[n.key] !== undefined ? animMap0422[n.key] : 0;
+        });
+    }
+
+    /* ── TemplateMapper FEFCO_0425 ────────────────────────────────
+       A implementar após validação do M422. */
+    function templateFEFCO_0425(nodes) {
+        var nodeByKey = {};
+        nodes.forEach(function(n) { nodeByKey[n.key] = n; });
+
+        /* panel_6 e panel_5 têm edge de ~13px (arco residual do canto arredondado).
+           Corrigir para a sobreposição vertical real entre cada painel e panel_0. */
+        function fullSharedEdge0425(nA, nB) {
+            var ptsA = nA.points, ptsB = nB.points, EPS = 4;
+            var bestLen = 0, bestEdge = null;
+            for (var i = 0; i < ptsA.length; i++) {
+                var a1 = ptsA[i], a2 = ptsA[(i + 1) % ptsA.length];
+                var dx = a2.x - a1.x, dy = a2.y - a1.y;
+                var segLen = Math.sqrt(dx*dx + dy*dy) || 1;
+                var ux = dx/segLen, uy = dy/segLen;
+                var hasColinear = false;
+                for (var j = 0; j < ptsB.length; j++) {
+                    var b = ptsB[j];
+                    if (Math.abs((b.x-a1.x)*dy - (b.y-a1.y)*dx) / segLen < EPS) { hasColinear = true; break; }
+                }
+                if (!hasColinear) continue;
+                var tsA = ptsA.map(function(p) { return (p.x-a1.x)*ux + (p.y-a1.y)*uy; });
+                var tsB = ptsB.map(function(p) {
+                    if (Math.abs((p.x-a1.x)*dy - (p.y-a1.y)*dx) / segLen >= EPS) return null;
+                    return (p.x-a1.x)*ux + (p.y-a1.y)*uy;
+                }).filter(function(t) { return t !== null; });
+                if (!tsB.length) continue;
+                var minA = Math.min.apply(null,tsA), maxA = Math.max.apply(null,tsA);
+                var minB = Math.min.apply(null,tsB), maxB = Math.max.apply(null,tsB);
+                var oMin = Math.max(minA,minB), oMax = Math.min(maxA,maxB);
+                if (oMax - oMin <= EPS) continue;
+                if (oMax - oMin > bestLen) {
+                    bestLen = oMax - oMin;
+                    var p1 = {x: a1.x+ux*oMin, y: a1.y+uy*oMin};
+                    var p2 = {x: a1.x+ux*oMax, y: a1.y+uy*oMax};
+                    var nx = -uy, ny = ux;
+                    var cen = (function(pts){ var sx=0,sy=0; pts.forEach(function(p){sx+=p.x;sy+=p.y;}); return {x:sx/pts.length,y:sy/pts.length}; })(ptsA);
+                    var side = (cen.x-p1.x)*nx + (cen.y-p1.y)*ny;
+                    bestEdge = side >= 0 ? {x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y} : {x1:p2.x,y1:p2.y,x2:p1.x,y2:p1.y};
+                }
+            }
+            return bestEdge;
+        }
+
+        var root0 = nodeByKey['panel_0'];
+        /* p6 e p5 têm pontos sujos (arcos SVG). Substituir por bbox rectangular limpo.
+           p6: edge em yMax (y=735, lado que toca o corpo). Orientação direita→esquerda (igual ao DCEL original).
+           p5: edge em yMin (y=1892, lado que toca o corpo). Orientação esquerda→direita. */
+        var n6 = nodeByKey['panel_6'];
+        if (n6) {
+            var xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity;
+            n6.points.forEach(function(p){if(p.x<xMin)xMin=p.x;if(p.x>xMax)xMax=p.x;if(p.y<yMin)yMin=p.y;if(p.y>yMax)yMax=p.y;});
+            /* yMin real de p6 é 440 (abaixo de p20 que ocupa y=423→440) */
+            n6.points = [{x:xMin,y:440},{x:xMax,y:440},{x:xMax,y:yMax},{x:xMin,y:yMax}];
+            n6.edge = {x1:xMax, y1:yMax, x2:xMin, y2:yMax};
+        }
+        var n5 = nodeByKey['panel_5'];
+        if (n5) {
+            var xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity;
+            n5.points.forEach(function(p){if(p.x<xMin)xMin=p.x;if(p.x>xMax)xMax=p.x;if(p.y<yMin)yMin=p.y;if(p.y>yMax)yMax=p.y;});
+            /* yMax real de p5 é 2187 (acima de p19 que ocupa y=2187→2204) */
+            n5.points = [{x:xMin,y:yMin},{x:xMax,y:yMin},{x:xMax,y:2187},{x:xMin,y:2187}];
+            n5.edge = {x1:xMin, y1:yMin, x2:xMax, y2:yMin};
+        }
+
+        /* panel_12 e panel_11 devem seguir panel_1 (parede dir), não panel_6/panel_5.
+           Mudar parentKey para panel_1 e corrigir o edge para a sobreposição real. */
+        var p1node = nodeByKey['panel_1'];
+        ['panel_12', 'panel_11'].forEach(function(key) {
+            var n = nodeByKey[key];
+            if (!n || !p1node) return;
+            n.parentKey = 'panel_1';
+            var better = fullSharedEdge0425(n, p1node);
+            if (better) n.edge = better;
+        });
+
+        /* p19 e p20 são faixas entre linhas azuis duplas horizontais — devem ser
+           rectângulos. O DCEL produz pontos degenerados por causa dos arcos.
+           Rectificar: bbox limpo nos points + edge horizontal correcto (lado
+           do rectângulo mais próximo do centróide do pai). */
+        ['panel_19', 'panel_20'].forEach(function(key) {
+            var n = nodeByKey[key];
+            if (!n || n.points.length < 3) return;
+            var pts = n.points;
+            var xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            pts.forEach(function(p) {
+                if (p.x < xMin) xMin = p.x;
+                if (p.x > xMax) xMax = p.x;
+                if (p.y < yMin) yMin = p.y;
+                if (p.y > yMax) yMax = p.y;
+            });
+            n.points = [
+                {x: xMin, y: yMin},
+                {x: xMax, y: yMin},
+                {x: xMax, y: yMax},
+                {x: xMin, y: yMax}
+            ];
+            /* edge = lado horizontal do rectângulo mais próximo do pai */
+            var parentNode = nodeByKey[n.parentKey];
+            if (parentNode) {
+                var pCen = polyCentroid(parentNode.points);
+                var distToTop = Math.abs(pCen.y - yMin);
+                var distToBot = Math.abs(pCen.y - yMax);
+                var edgeY = (distToTop < distToBot) ? yMin : yMax;
+                n.edge = {x1: xMin, y1: edgeY, x2: xMax, y2: edgeY};
+            }
+        });
+
+        templateGeneric(nodes);
+        nodes.forEach(function(n) { n.foldSign = -1; });
+
+        /* animGroup — ordem de fecho (após templateGeneric para não ser sobrescrito):
+           0: p1, p2 levantam + abas directas
+           1: p5, p6 levantam + tudo o que fecham
+           2: abas finais de p1/p2 */
+        var animMap = {
+            'panel_0':  0,
+            'panel_1':  0, 'panel_2':  0,
+            'panel_9':  0, 'panel_10': 0,
+            'panel_12': 0, 'panel_11': 0,
+            'panel_5':  1, 'panel_6':  1,
+            'panel_19': 1, 'panel_20': 1,
+            'panel_7':  1, 'panel_8':  1,
+            'panel_13': 1, 'panel_14': 1, 'panel_15': 1, 'panel_16': 1,
+            'panel_17': 2, 'panel_18': 2,
+            'panel_3':  2, 'panel_4':  2,
+        };
+        nodes.forEach(function(n) { n.animGroup = animMap[n.key] !== undefined ? animMap[n.key] : 0; });
+        /* p13-p16: abas laterais que fecham para dentro */
+        ['panel_13', 'panel_14', 'panel_15', 'panel_16'].forEach(function(key) {
+            var n = nodeByKey[key];
+            if (n) n.foldSign = 1;
+        });
+        /* p7 e p8 fecham ambos para dentro. O reset global já pôs -1 em todos,
+           que é o correcto para p8. p7 tem edge com orientação oposta (DCEL),
+           por isso mantém também -1 — o efeito visual é simétrico. */
+        var p7n = nodeByKey['panel_7'];
+        if (p7n) p7n.foldSign = -1;
+        /* p20 dobra para dentro (oposto ao p19) */
+        var p20n = nodeByKey['panel_20'];
+        if (p20n) p20n.foldSign = 1;
+    }
+
     /* ── dispatcher ───────────────────────────────────────────────── */
     var TEMPLATE_MAPPERS = {
         'FEFCO_0427': templateFEFCO_0427,
         'FEFCO_0201': templateFEFCO_0201,
+        'FEFCO_0216': templateFEFCO_0216,
+        'FEFCO_0215': templateFEFCO_0215,
         'FEFCO_0200': templateFEFCO_0200,
         'FEFCO_04XX': templateFEFCO_04XX,
+        'FEFCO_0422': templateFEFCO_0422,
+        'FEFCO_0425': templateFEFCO_0425,
         'GENERIC':    templateGeneric,
     };
 

@@ -29,6 +29,7 @@
     /* Three */
     var scene, camera, renderer, boxPivot, boxGroup, axesHelper;
     var sph = { r: ZOOM_DEFAULT };
+    var flatSize = ZOOM_DEFAULT;
     /* Rotação livre sem gimbal lock: quaternion acumulado no boxPivot (inicializado em initThree) */
     var rotQuat = null;
 
@@ -155,9 +156,10 @@
         boxPivot.add(boxGroup);
         scene.add(boxPivot);
 
-        /* Rotação inicial: nenhuma — caixa de frente para a câmara */
+        /* Rotação inicial: 90° em X para que a dieline planificada fique de frente
+           para a câmara (igual à vista SVG 2D: X=direita, Y=baixo). */
         if (rotQuat) {
-            rotQuat.set(0, 0, 0, 1);
+            rotQuat.setFromEuler(new THREE.Euler(Math.PI, 0, 0));
             boxPivot.quaternion.copy(rotQuat);
         }
 
@@ -187,6 +189,16 @@
             }
         });
         sceneSize = Math.max(baseL, baseW, maxH, 50);
+
+        /* flatSize = bounding box de todos os nodes no plano planificado.
+           Usado para o zoom inicial mostrar a dieline completa. */
+        var fxMin=Infinity,fxMax=-Infinity,fyMin=Infinity,fyMax=-Infinity;
+        geo.nodes.forEach(function(n){ n.points.forEach(function(p){
+            var sx=mm(p.x-off.x), sy=mm(p.y-off.y);
+            if(sx<fxMin)fxMin=sx; if(sx>fxMax)fxMax=sx;
+            if(sy<fyMin)fyMin=sy; if(sy>fyMax)fyMax=sy;
+        }); });
+        flatSize = Math.max(fxMax-fxMin, fyMax-fyMin, sceneSize);
 
         /* Levantar a caixa: rodar boxGroup -90° em X → base no plano XY, paredes em Z/Y.
            Após esta rotação: X=L, Y=W(profundidade), Z=H(altura visual).
@@ -331,13 +343,13 @@
 
         /* DEBUG labels — remover depois */
         (function() {
-            var cv = document.createElement('canvas'); cv.width = 256; cv.height = 128;
+            var cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
             var ctx = cv.getContext('2d');
-            ctx.fillStyle = 'rgba(255,230,0,0.92)'; ctx.fillRect(0,0,256,128);
-            ctx.fillStyle = '#000'; ctx.font = 'bold 56px sans-serif'; ctx.textAlign = 'center';
-            ctx.fillText(node.key.replace('panel_','p'), 128, 80);
+            ctx.fillStyle = 'rgba(255,230,0,0.92)'; ctx.fillRect(0,0,256,256);
+            ctx.fillStyle = '#000'; ctx.font = 'bold 160px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(node.key.replace('panel_','p'), 128, 190);
             var lbl = new THREE.Mesh(
-                new THREE.PlaneGeometry(30, 15),
+                new THREE.PlaneGeometry(30, 30),
                 new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, side: THREE.DoubleSide })
             );
             var cx = 0, cy = 0;
@@ -1914,10 +1926,10 @@
     wire('ctrl-reset', function () {
         stopAnim(); animT = 0; animDir = 1; updateSlider(0); updateFolds(0);
         if (rotQuat && boxPivot) {
-            rotQuat.set(0, 0, 0, 1);
+            rotQuat.setFromEuler(new THREE.Euler(Math.PI, 0, 0));
             boxPivot.quaternion.copy(rotQuat);
         }
-        sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5); updateCam();
+        sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7; updateCam();
     });
 
     var slider = document.getElementById('animSlider');
@@ -1943,7 +1955,7 @@
             if (!geo.nodes || !geo.nodes.length) return;
             stopAnim(); animT = 0; animDir = 1; updateSlider(0);
             buildFromGeometry(geo);
-            sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5);
+            sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7;
             updateCam();
             render2dLogo();
             applyLogoToAllFaces();
@@ -2105,7 +2117,7 @@
                     if (iH) iH.value = Math.round(geo.meta.height);
                 }
                 buildFromGeometry(geo);
-                sph.r = Math.max(ZOOM_DEFAULT, sceneSize * 2.5);
+                sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7;
                 updateCam();
                 if (_cfg.orderArtworkJson) {
                     /* Modo preview de encomenda: carregar artwork da config guardada */
