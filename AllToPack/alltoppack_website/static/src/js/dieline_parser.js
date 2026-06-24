@@ -940,7 +940,8 @@
         var typeA = type || meta.box_type || 'GENERIC';
         applyTemplateMapper(nodes, typeA);
 
-        return { meta: meta, unit: unit, rootKey: nodes[0].key, type: typeA, nodes: nodes };
+        var trueRootA = nodes.filter(function(n) { return n.parentKey == null; })[0] || nodes[0];
+        return { meta: meta, unit: unit, rootKey: trueRootA.key, type: typeA, nodes: nodes };
     }
 
     /* ══════════════════════════════════════════════════════════════
@@ -1060,36 +1061,93 @@
     function templateFEFCO_0427(nodes) {
         var nodeByKey = {};
         nodes.forEach(function (n) { nodeByKey[n.key] = n; });
+
+        var animMap = {
+            'panel_0':  0,
+            'panel_2':  0, 'panel_4':  0,
+            'panel_13': 0, 'panel_14': 0,
+            'panel_11': 0, 'panel_12': 0,
+            'panel_5':  1, 'panel_6':  1,
+            'panel_17': 1, 'panel_18': 1,
+            'panel_7':  1, 'panel_8':  1,
+            'panel_9':  2, 'panel_10': 2,
+            'panel_15': 2, 'panel_16': 2,
+            'panel_1':  2, 'panel_3':  2,
+        };
+
         nodes.forEach(function (n) {
-            n._depth = (n.parentKey == null) ? 0 : ((nodeByKey[n.parentKey] || {})._depth || 0) + 1;
+            n.animGroup = animMap[n.key] !== undefined ? animMap[n.key] : 0;
+            n.foldSign = -1;
         });
 
-        var rootArea = nodes[0] ? polyArea(nodes[0].points) : 1;
+        /* p5 e p6 têm edge oblíquo do arco residual — corrigir para vertical */
+        var p5 = nodeByKey['panel_5'], p6 = nodeByKey['panel_6'];
+        if (p5) {
+            var b5 = bbox(p5.points);
+            p5.edge = { x1: b5.x1, y1: b5.y0, x2: b5.x1, y2: b5.y1 };
+        }
+        if (p6) {
+            var b6 = bbox(p6.points);
+            p6.edge = { x1: b6.x0, y1: b6.y1, x2: b6.x0, y2: b6.y0 };
+        }
+        /* p2 edge da esquerda para a direita (orientação correcta para dobrar para dentro) */
+        var p2 = nodeByKey['panel_2'];
+        if (p2) {
+            var b2 = bbox(p2.points);
+            p2.edge = { x1: b2.x0, y1: b2.y1, x2: b2.x1, y2: b2.y1 };
+            p2.foldSign = 1;
+        }
 
-        nodes.forEach(function (n) {
-            if (n.parentKey == null) { n.foldSign = -1; n.animGroup = 0; return; }
-
-            var parentNode = nodeByKey[n.parentKey] || null;
-            n.foldSign = defaultFoldSign(n, parentNode);
-
-            var areaRatio = polyArea(n.points) / (rootArea || 1);
-            var e = n.edge;
-            var dx = e ? (e.x2 - e.x1) : 0, dy = e ? (e.y2 - e.y1) : 0;
-            var len = Math.sqrt(dx * dx + dy * dy) || 1;
-            var isVertAxis = Math.abs(dy / len) > 0.7;
-
-            var isLid = (!n.isFoldEdge) && (areaRatio > 0.25);
-
-            if (isLid) {
-                n.animGroup = 10;
-            } else if (n._depth >= 2) {
-                n.animGroup = 2;  /* abas */
-            } else if (n._depth === 1 && isVertAxis) {
-                n.animGroup = 0;  /* paredes corpo, eixo vertical */
-            } else {
-                n.animGroup = 1;  /* paredes laterais */
+        /* p13 e p14 são abas do fundo — devem seguir p4 com edge calculado dos pontos */
+        var p4 = nodeByKey['panel_4'];
+        var p13 = nodeByKey['panel_13'], p14 = nodeByKey['panel_14'];
+        function sharedEdge427(nA, nB) {
+            var ptsA = nA.points, ptsB = nB.points, EPS = 6;
+            var bestLen = 0, bestEdge = null;
+            for (var i = 0; i < ptsA.length; i++) {
+                var a1 = ptsA[i], a2 = ptsA[(i+1) % ptsA.length];
+                var dx = a2.x-a1.x, dy = a2.y-a1.y;
+                var segLen = Math.sqrt(dx*dx+dy*dy) || 1;
+                for (var j = 0; j < ptsB.length; j++) {
+                    var b1 = ptsB[j], b2 = ptsB[(j+1) % ptsB.length];
+                    var c1 = Math.abs((b1.x-a1.x)*dy-(b1.y-a1.y)*dx)/segLen;
+                    var c2 = Math.abs((b2.x-a1.x)*dy-(b2.y-a1.y)*dx)/segLen;
+                    if (c1>EPS && c2>EPS) continue;
+                    var t1 = ((b1.x-a1.x)*dx+(b1.y-a1.y)*dy)/(segLen*segLen);
+                    var t2 = ((b2.x-a1.x)*dx+(b2.y-a1.y)*dy)/(segLen*segLen);
+                    var ov = (Math.min(Math.max(t1,t2),1)-Math.max(Math.min(t1,t2),0))*segLen;
+                    if (ov > EPS && ov > bestLen) {
+                        bestLen = ov;
+                        bestEdge = {x1:a1.x,y1:a1.y,x2:a2.x,y2:a2.y};
+                    }
+                }
             }
-        });
+            return bestEdge;
+        }
+        if (p13 && p4) {
+            p13.parentKey = 'panel_4';
+            p13.edge = sharedEdge427(p13, p4) || p13.edge;
+            p13.foldSign = 1;
+        }
+        if (p14 && p4) {
+            p14.parentKey = 'panel_4';
+            p14.edge = sharedEdge427(p14, p4) || p14.edge;
+            p14.foldSign = 1;
+        }
+
+        /* p1 e p3 são as metades do lid — forçar edge horizontal no topo do bbox
+           (o lado que toca p0) para garantir simetria e evitar arco residual */
+        var p1 = nodeByKey['panel_1'], p3 = nodeByKey['panel_3'];
+        if (p1) {
+            var b1 = bbox(p1.points);
+            p1.edge = { x1: b1.x0, y1: b1.y1, x2: b1.x1, y2: b1.y1 };
+            p1.foldSign = defaultFoldSign(p1, nodeByKey[p1.parentKey]);
+        }
+        if (p3) {
+            var b3 = bbox(p3.points);
+            p3.edge = { x1: b3.x1, y1: b3.y1, x2: b3.x0, y2: b3.y1 };
+            p3.foldSign = defaultFoldSign(p3, nodeByKey[p3.parentKey]);
+        }
     }
 
     /* ── TemplateMapper FEFCO_0201 / FEFCO_0200 ──────────────────────
@@ -1657,7 +1715,9 @@
             if (pxBig > 0 && mmBig > 0) unit = pxBig / mmBig;
         }
 
-        return { meta: meta, unit: unit, rootKey: nodes[0].key, type: boxType, nodes: nodes };
+        /* rootKey = nó com parentKey==null após o TemplateMapper (pode ter mudado, e.g. M215) */
+        var trueRootNode = nodes.filter(function(n) { return n.parentKey == null; })[0] || nodes[0];
+        return { meta: meta, unit: unit, rootKey: trueRootNode.key, type: boxType, nodes: nodes };
     }
 
     function parse(url, type) {

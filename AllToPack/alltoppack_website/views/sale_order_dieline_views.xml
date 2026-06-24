@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
-    <!-- ── Form view de sale.order.dieline (SVG preview + download) ── -->
+    <!-- ── Form view de sale.order.dieline ── -->
     <record id="sale_order_dieline_form" model="ir.ui.view">
         <field name="name">sale.order.dieline.form</field>
         <field name="model">sale.order.dieline</field>
@@ -21,25 +21,14 @@
                     </group>
                     <div class="d-flex gap-2 mb-3">
                         <button name="action_download_svg_front" type="object"
-                                string="Descarregar SVG Frente" icon="fa-download"
-                                class="btn btn-sm btn-primary"/>
+                                string="Dieline SVG Frente" icon="fa-file-code-o"
+                                class="btn btn-sm btn-success"
+                                invisible="not dieline_svg"/>
                         <button name="action_download_svg_back" type="object"
-                                string="Descarregar SVG Verso" icon="fa-download"
-                                class="btn btn-sm btn-secondary"/>
-                        <!-- Ver Dieline 3D — comentado, pode ser necessário mais tarde
-                        <button name="action_open_preview" type="object"
-                                string="Ver Dieline 3D" icon="fa-cube"
-                                class="btn btn-sm btn-outline-primary"/>
-                        -->
+                                string="Dieline SVG Verso" icon="fa-file-code-o"
+                                class="btn btn-sm btn-outline-success"
+                                invisible="not dieline_svg"/>
                     </div>
-                    <notebook>
-                        <page string="Front" name="svg_front_page">
-                            <field name="svg_front_html" readonly="1" nolabel="1"/>
-                        </page>
-                        <page string="Back" name="svg_back_page">
-                            <field name="svg_back_html" readonly="1" nolabel="1"/>
-                        </page>
-                    </notebook>
                 </sheet>
             </form>
         </field>
@@ -61,9 +50,15 @@
                             <field name="box_l" string="L (mm)" digits="[6,0]"/>
                             <field name="box_w" string="W (mm)" digits="[6,0]"/>
                             <field name="box_h" string="H (mm)" digits="[6,0]"/>
-                            <button name="action_open_svg" type="object"
-                                    string="Ver SVG" icon="fa-file-image-o"
-                                    class="btn-sm btn-outline-secondary"/>
+                            <field name="dieline_svg" column_invisible="1"/>
+                            <button name="action_download_svg_front" type="object"
+                                    string="SVG Frente" icon="fa-file-code-o"
+                                    class="btn-sm btn-success"
+                                    invisible="not dieline_svg"/>
+                            <button name="action_download_svg_back" type="object"
+                                    string="SVG Verso" icon="fa-file-code-o"
+                                    class="btn-sm btn-outline-success"
+                                    invisible="not dieline_svg"/>
                         </list>
                     </field>
                 </page>

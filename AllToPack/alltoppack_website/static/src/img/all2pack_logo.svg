@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <rect width="400" height="120" fill="white"/>
+  <text x="10" y="75" font-family="Arial, sans-serif" font-weight="bold" font-size="72" fill="#3d3d3d" letter-spacing="-2">ALL</text>
+  <text x="162" y="75" font-family="Arial, sans-serif" font-weight="bold" font-size="72" fill="#1e88e5">2</text>
+  <text x="208" y="75" font-family="Arial, sans-serif" font-weight="bold" font-size="72" fill="#3d3d3d" letter-spacing="-2">PACK</text>
+  <line x1="10" y1="85" x2="260" y2="85" stroke="#3d3d3d" stroke-width="2"/>
+  <text x="265" y="103" font-family="Arial, sans-serif" font-size="18" fill="#3d3d3d" letter-spacing="2">ONLINE STORE</text>
+</svg>

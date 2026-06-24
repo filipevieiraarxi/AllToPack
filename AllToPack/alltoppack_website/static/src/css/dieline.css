@@ -87,18 +87,12 @@
     flex: 1;
     overflow: hidden;
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: default;
 }
 
 .atp-logo2d-canvas {
     display: block;
-    /* tamanho controlado por JS */
-    image-rendering: crisp-edges;
-    border-radius: 4px;
-    box-shadow: 0 4px 20px rgba(15,23,42,.12);
+    width: 100%;
+    height: 100%;
     background: #fff;
     cursor: crosshair;
 }
@@ -689,6 +683,73 @@
         overflow-x: hidden;
     }
     .atp-dl-page { height: auto; min-height: 100svh; }
+}
+
+/* ── LOGO INFO PANEL (cotas + tamanho) ──────────────────────────── */
+.atp-logo-info-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 12px;
+    gap: 8px;
+}
+.atp-logo-info-row:last-child { border-bottom: none; }
+.atp-logo-info-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    flex-shrink: 0;
+}
+.atp-logo-info-val {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1e293b;
+}
+.atp-logo-info-stepper {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+}
+.atp-logo-size-btn {
+    width: 26px;
+    height: 26px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: #f8fafc;
+    color: #1d4ed8;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    transition: background .12s;
+}
+.atp-logo-size-btn:hover { background: #dbeafe; }
+
+/* Grid das 4 cotas (cima/baixo/esq/dir) */
+.atp-logo-info-cotas {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    padding: 8px 0 2px;
+}
+.atp-logo-info-cotas span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0f766e;
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    border-radius: 6px;
+    padding: 5px 8px;
 }
 
 /* ── ADD TO CART BUTTON ──────────────────────────────────────────── */

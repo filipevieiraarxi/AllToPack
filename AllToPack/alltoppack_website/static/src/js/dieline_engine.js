@@ -36,55 +36,11 @@
     /* árvore de dobras montada: lista de { node, pivot, foldSign, axis } */
     var folds = [];
     var svgTextCache = null;
-    var faceBaseColor = {};  /* { face_key_base: hex } — cor original da face */
+    var meshMap = {};
+    var _currentGeo = null;
 
-    /* ── LOGO (estado global) ───────────────────────────────────────
-       Dois logos independentes: front (exterior _outer) e back (interior _inner).
-       Cada um tem dataUrl, posição dieline, tamanho, rotação e cache de imagem.
-       logoSide controla qual está activo na vista 2D.
-    ─────────────────────────────────────────────────────────────── */
-    var logoSide = 'front'; /* 'front' | 'back' — qual está activo no 2D */
-
-    /* Estado por lado — acedido via logoState[side] */
-    var logoState = {
-        front: { dataUrl: null, dieline: null, sizeMM: 80, rot: 0, img: null, stripped: null },
-        back:  { dataUrl: null, dieline: null, sizeMM: 80, rot: 0, img: null, stripped: null },
-    };
-
-    /* Atalhos para o lado activo — lidos/escritos nas funções que só operam num lado */
-    function ls() { return logoState[logoSide]; }
-
-    /* Compatibilidade com código que usa as variáveis antigas directamente */
-    Object.defineProperty(window, '_logoActiveState', { get: ls });
-
-    /* Variáveis legadas (apontam para o lado activo — usadas em render2dLogo e drag) */
-    var logoDataUrl, logoDieline, logoSizeMM, logoRot, _logoImg, _logoStripped;
-    function syncLegacy() {
-        var s = ls();
-        logoDataUrl   = s.dataUrl;
-        logoDieline   = s.dieline;
-        logoSizeMM    = s.sizeMM;
-        logoRot       = s.rot;
-        _logoImg      = s.img;
-        _logoStripped = s.stripped;
-    }
-    function saveLegacy() {
-        var s = ls();
-        s.dataUrl  = logoDataUrl;
-        s.dieline  = logoDieline;
-        s.sizeMM   = logoSizeMM;
-        s.rot      = logoRot;
-        s.img      = _logoImg;
-        s.stripped = _logoStripped;
-    }
-    var meshMap = {};          /* faceKey → THREE.Mesh */
-    var _currentGeo   = null;  /* geometria actual (para 2D Logo e rebuild 3D) */
-
-    /* ── 2D Logo view state ─────────────────────────────────────── */
-    var logo2dZoom    = 1;     /* factor de zoom do canvas 2D Logo */
-    var logo2dPan     = { x: 0, y: 0 };  /* offset de pan em px do canvas */
-    var logo2dScale   = 1;     /* mm → px do canvas (resolução do dieline renderizado) */
-    var logo2dOffMM   = { x: 0, y: 0 };  /* origem do dieline em mm no canvas */
+    /* geo activo — necessário para o Logo2D e para o rebuild */
+    var _activeGeo = null;
 
     /* centro/escala da cena (mm) para câmara e eixos */
     var sceneSize = 300;
@@ -146,6 +102,7 @@
        ════════════════════════════════════════════════════════════ */
     function buildFromGeometry(geo) {
         _currentGeo = geo;
+        _activeGeo = geo;
         clearScene();
 
         /* boxPivot: fica na ORIGEM, só recebe a rotação do utilizador.
@@ -249,8 +206,7 @@
             var parent = node.parentKey ? groups[node.parentKey] : null;
             var parentAttach = parent ? parent.attach : boxGroup;
 
-            var color = node.parentKey == null ? COL_BASE
-                      : node.angle >= 135 ? COL_LID : COL_WALL;
+            var color = node.angle >= 135 ? COL_LID : COL_WALL;
 
             if (node.parentKey == null) {
                 var mesh = polyMesh(node.points, off, mm, color, node.key, node.stackOrder || 0);
@@ -263,10 +219,18 @@
                         return { s: captMm(p.x - captOff.x), d: captMm(p.y - captOff.y) };
                     };
                 }(off, mm));
+                /* local(s,d) → SVG(x,y): inversa trivial */
+                node._localToSvg = (function(captOff, captMm) {
+                    var invMm = 1 / captMm(1);
+                    return function(s, d) {
+                        return { x: s * invMm + captOff.x, y: d * invMm + captOff.y };
+                    };
+                }(off, mm));
                 node._localAngle = 0;
                 node._localPts = node.points.map(function(p) {
                     return { x: mm(p.x - off.x), y: mm(p.y - off.y) };
                 });
+                node._texYInvert = true; /* root: rotation.x=PI/2 inverte UV-v */
                 return;
             }
 
@@ -314,6 +278,12 @@
            s → û ; d → n̂. Base ORTONORMAL DIREITA { X=û, Y=n̂, Z=û×n̂ }
            (det=+1, senão setFromRotationMatrix devolve lixo). */
         var zHat = new THREE.Vector3().crossVectors(uHat, nHat);
+        /* faceFlipped = true quando a face _outer (FrontSide, z=+halfT) ficaria
+           virada para o interior. Dois factores contribuem:
+           1. zHat.y < 0 → o normal do mesh aponta para baixo (interior)
+           2. foldSign === 1 → a dobra é para dentro, invertendo qual face fica exposta
+           Os dois efeitos são independentes e combinam por XOR. */
+        var faceFlipped = (zHat.y < 0);
         var childRestWorld = new THREE.Matrix4().makeBasis(uHat, nHat, zHat);
         childRestWorld.elements[12] = A.x;
         childRestWorld.elements[13] = A.y;
@@ -338,10 +308,15 @@
             var rel = P.clone().sub(A);
             return new THREE.Vector2(rel.dot(uHat), rel.dot(nHat));
         });
+        /* Se faceFlipped, inverter Z do grupo do mesh para que _outer (FrontSide)
+           fique do lado correcto sem alterar a base, o pivot ou a animação. */
+        var meshGroup = new THREE.Group();
+        if (faceFlipped) meshGroup.scale.z = -1;
+        foldGroup.add(meshGroup);
         var mesh = shapeMesh(pts2d, color, node.key, node.stackOrder || 0);
-        foldGroup.add(mesh);
+        meshGroup.add(mesh);
 
-        /* DEBUG labels — remover depois */
+        /* label de debug — número do painel centrado na face */
         (function() {
             var cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
             var ctx = cv.getContext('2d');
@@ -379,8 +354,19 @@
                 return { s: rel.dot(captUHat), d: rel.dot(captNHat) };
             };
         }(A.clone(), uHat.clone(), nHat.clone(), sceneOf));
-        node._localAngle = localAngle; /* ângulo de rotação do referencial local */
+        /* local(s,d) → SVG(x,y): world = A + s*û + d*n̂; svgX = world.x/mm(1)+off.x, svgY = world.z/mm(1)+off.y */
+        node._localToSvg = (function(captA, captUHat, captNHat, captOff, captMm) {
+            var invMm = 1 / captMm(1);
+            return function(s, d) {
+                return {
+                    x: (captA.x + s * captUHat.x + d * captNHat.x) * invMm + captOff.x,
+                    y: (captA.z + s * captUHat.z + d * captNHat.z) * invMm + captOff.y
+                };
+            };
+        }(A.clone(), uHat.clone(), nHat.clone(), off, mm));
+        node._localAngle = localAngle;
         node._localPts = pts2d.map(function(v) { return { x: v.x, y: v.y }; });
+        node._texYInvert = false; /* filhos: referencial correcto, sem inversão UV-v */
 
         /* animGroup vem do TemplateMapper — não há heurísticas aqui. */
         folds.push({
@@ -650,8 +636,6 @@
         boxGroup = null;
         folds = [];
         meshMap = {};
-        faceBaseColor = {};
-        updateArtworkPanel();
     }
 
     /* ── AXES ───────────────────────────────────────────────────── */
@@ -729,27 +713,17 @@
     /* ── VIEW TOGGLE ────────────────────────────────────────────── */
     function setView(v) {
         currentView = v;
-        var is3d     = v === '3d';
-        var is2d     = v === '2d';
-        var isLogo2d = v === 'logo2d';
-        var logoView = document.getElementById('atp-logo2d-view');
-        if (c3)      c3.style.display      = is3d     ? 'block' : 'none';
-        if (view2d)  view2d.style.display  = is2d     ? 'flex'  : 'none';
-        if (logoView) logoView.style.display = isLogo2d ? 'flex'  : 'none';
-        if (hint)    hint.style.display    = is3d     ? ''      : 'none';
+        var is3d    = v === '3d';
+        var is2d    = v === '2d';
+        var isLogo  = v === 'logo2d';
+        var logo2dEl = document.getElementById('atp-logo2d-view');
+        if (c3)       c3.style.display       = is3d   ? 'block' : 'none';
+        if (view2d)   view2d.style.display   = is2d   ? 'flex'  : 'none';
+        if (logo2dEl) logo2dEl.style.display = isLogo ? 'flex'  : 'none';
+        if (hint)     hint.style.display     = is3d   ? ''      : 'none';
         var b3 = document.getElementById('ctrl-3d');     if (b3) b3.classList.toggle('active', is3d);
         var b2 = document.getElementById('ctrl-2d');     if (b2) b2.classList.toggle('active', is2d);
-        var bL = document.getElementById('ctrl-logo2d'); if (bL) bL.classList.toggle('active', isLogo2d);
-        if (isLogo2d) {
-            /* Renderizar quando a vista fica visível (canvas pode ter tamanho 0 antes) */
-            setTimeout(function () {
-                if (c2logo) {
-                    var wrap = document.getElementById('atp-logo2d-wrap');
-                    if (wrap) { c2logo.width = wrap.clientWidth || 800; c2logo.height = wrap.clientHeight || 600; }
-                }
-                render2dLogo();
-            }, 50);
-        }
+        var bL = document.getElementById('ctrl-logo2d'); if (bL) bL.classList.toggle('active', isLogo);
     }
 
     /* ── INIT ───────────────────────────────────────────────────── */
@@ -772,7 +746,9 @@
 
         /* rotação livre por quaternion — sem gimbal lock */
         var drag = false, prev = { x: 0, y: 0 };
-        c3.addEventListener('mousedown', function (e) { drag = true; prev = { x: e.clientX, y: e.clientY }; });
+        c3.addEventListener('mousedown', function (e) {
+            drag = true; prev = { x: e.clientX, y: e.clientY };
+        });
         window.addEventListener('mouseup', function () { drag = false; });
         window.addEventListener('mousemove', function (e) {
             if (!drag) return;
@@ -835,1063 +811,17 @@
         if (icon) icon.className = 'fa fa-play';
     }
 
-    /* ── ARTWORK ────────────────────────────────────────────────── */
 
-    /* Lê o bounding box 2D dos vértices de uma ShapeGeometry. */
-    function faceBBox(geometry) {
-        var pos = geometry.attributes.position;
-        var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (var i = 0; i < pos.count; i++) {
-            var x = pos.getX(i), y = pos.getY(i);
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-        }
-        return { minX: minX, minY: minY, w: maxX - minX || 1, h: maxY - minY || 1 };
-    }
-
-    /* Normaliza os UVs de uma ShapeGeometry para [0,1]×[0,1] sobre o bbox. */
-    function normaliseFaceUVs(geometry) {
-        var bb = faceBBox(geometry);
-        var pos = geometry.attributes.position;
-        var uv = geometry.attributes.uv;
-        if (!uv) return;
-        for (var j = 0; j < uv.count; j++) {
-            uv.setXY(j, (pos.getX(j) - bb.minX) / bb.w, (pos.getY(j) - bb.minY) / bb.h);
-        }
-        uv.needsUpdate = true;
-    }
-
-    /* ── LOGO — sistema baseado em coordenadas DIELINE (SVG px) ──────
-       O logo é posicionado em logoDieline {x,y} no espaço do dieline.
-       Na vista 2D Logo: drag direto no canvas → atualiza logoDieline.
-       No 3D: cada painel que contenha logoDieline recebe uma textura com
-       o logo mapeado (por painel — segue a dobra).
-    ─────────────────────────────────────────────────────────────── */
-
-    function stripWhiteBackground(img) {
-        var THRESHOLD = 235;
-        var canvas = document.createElement('canvas');
-        canvas.width = img.width; canvas.height = img.height;
-        var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        try {
-            var data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            var px = data.data;
-            for (var i = 0; i < px.length; i += 4) {
-                if (px[i] >= THRESHOLD && px[i + 1] >= THRESHOLD && px[i + 2] >= THRESHOLD) px[i + 3] = 0;
-            }
-            ctx.putImageData(data, 0, 0);
-        } catch (e) {}
-        return canvas;
-    }
-
-    /* Converte mm do dieline → px SVG (unidade raw do parser).
-       O parser usa geo.unit = px/mm. Se não houver geo, usa 1:1. */
-    function dielineMmToPx(mm_val) {
-        var u = (_currentGeo && _currentGeo.unit) ? _currentGeo.unit : 1;
-        return mm_val * u;
-    }
-    function dielinePxToMm(px_val) {
-        var u = (_currentGeo && _currentGeo.unit) ? _currentGeo.unit : 1;
-        return px_val / u;
-    }
-
-    /* Ray-casting point-in-polygon para polígono 2D arbitrário. */
-    function pointInPolygon(px, py, poly) {
-        var inside = false;
-        var n = poly.length;
-        for (var i = 0, j = n - 1; i < n; j = i++) {
-            var xi = poly[i].x, yi = poly[i].y;
-            var xj = poly[j].x, yj = poly[j].y;
-            if (((yi > py) !== (yj > py)) &&
-                (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
-                inside = !inside;
-            }
-        }
-        return inside;
-    }
-
-    /* Constrói a textura de uma face com o logo mapeado no espaço LOCAL do shape.
-       localPts: pontos do painel em coords locais do shape (mm, mesmas que a geometry Three.js).
-       svgToLocal: função que converte um ponto SVG {x,y} → {s,d} em coords locais.
-       logoDielineSVG: centro do logo em coords SVG absolutas.
-       logoSizePx: largura do logo em px SVG.
-    */
-    function buildPanelLogoTexture(localPts, svgToLocal, localAngle, faceColor, logoImg, logoDielineSVG, logoSizePx, mirrorS) {
-        var imgW = logoImg.naturalWidth  || logoImg.width  || 1;
-        var imgH = logoImg.naturalHeight || logoImg.height || 1;
-        var u = (_currentGeo && _currentGeo.unit) || 1;
-
-        /* Converter centro e tamanho do logo para coords locais do shape */
-        var logoCenter = svgToLocal(logoDielineSVG);       /* {s, d} em mm */
-        var logoWmm = logoSizePx / u;                      /* mm */
-        var logoHmm = logoWmm / (imgW / imgH);
-        var halfW = logoWmm / 2, halfH = logoHmm / 2;
-        var cx = logoCenter.s, cy = logoCenter.d;
-
-        var rad = logoRot * Math.PI / 180 - localAngle;
-        var cosR = Math.cos(rad), sinR = Math.sin(rad);
-
-        /* bbox do painel em coords locais */
-        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        localPts.forEach(function(p) {
-            minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-        });
-        var pw = maxX - minX || 1, ph = maxY - minY || 1;
-
-        /* Intersecção: centro do logo dentro do polígono local? */
-        var poly = localPts.map(function(p) { return { x: p.x, y: p.y }; });
-        var hasHit = pointInPolygon(cx, cy, poly);
-
-        /* Cantos do logo dentro do polígono? */
-        if (!hasHit) {
-            var corners = [
-                { x: cx + (-halfW)*cosR - (-halfH)*sinR, y: cy + (-halfW)*sinR + (-halfH)*cosR },
-                { x: cx + ( halfW)*cosR - (-halfH)*sinR, y: cy + ( halfW)*sinR + (-halfH)*cosR },
-                { x: cx + ( halfW)*cosR - ( halfH)*sinR, y: cy + ( halfW)*sinR + ( halfH)*cosR },
-                { x: cx + (-halfW)*cosR - ( halfH)*sinR, y: cy + (-halfW)*sinR + ( halfH)*cosR },
-            ];
-            for (var ci = 0; ci < 4 && !hasHit; ci++) {
-                if (pointInPolygon(corners[ci].x, corners[ci].y, poly)) hasHit = true;
-            }
-        }
-
-        /* Vértices do painel dentro do logo (logo cobre painel inteiro)? */
-        if (!hasHit) {
-            for (var pi = 0; pi < poly.length && !hasHit; pi++) {
-                var dxv = poly[pi].x - cx, dyv = poly[pi].y - cy;
-                var lxv = dxv * cosR + dyv * sinR, lyv = -dxv * sinR + dyv * cosR;
-                if (Math.abs(lxv) <= halfW && Math.abs(lyv) <= halfH) hasHit = true;
-            }
-        }
-
-        if (!hasHit) return null;
-
-        /* Resolução do canvas: baseada no bbox local */
-        var BASE = 512;
-        var fcw, fch;
-        if (pw >= ph) { fcw = BASE; fch = Math.max(1, Math.round(BASE * ph / pw)); }
-        else           { fch = BASE; fcw = Math.max(1, Math.round(BASE * pw / ph)); }
-
-        /* Preparar pixels do logo */
-        var logoCanvas = document.createElement('canvas');
-        logoCanvas.width = imgW; logoCanvas.height = imgH;
-        var lctx = logoCanvas.getContext('2d');
-        lctx.drawImage(_logoStripped || logoImg, 0, 0, imgW, imgH);
-        var logoData;
-        try { logoData = lctx.getImageData(0, 0, imgW, imgH); } catch(e) { return null; }
-        var lpx = logoData.data;
-
-        var fc = faceColor;
-        var bgR = (fc >> 16) & 255, bgG = (fc >> 8) & 255, bgB = fc & 255;
-        var outData = new Uint8ClampedArray(fcw * fch * 4);
-
-        /* Para cada pixel do canvas (coords locais do shape):
-           pixel (px,py) → posição local (lx_shape, ly_shape)
-           → projectar no logo rodado → ler pixel */
-        var stepX = pw / fcw, stepY = ph / fch;
-        for (var py = 0; py < fch; py++) {
-            var localY = minY + py * stepY;
-            for (var px = 0; px < fcw; px++) {
-                var localX = minX + px * stepX;
-                /* coords relativas ao centro do logo, rodadas */
-                var dx = localX - cx, dy = localY - cy;
-                var lx = dx * cosR + dy * sinR;
-                var ly = -dx * sinR + dy * cosR;
-                var outIdx = (py * fcw + px) * 4;
-                if (lx < -halfW || lx > halfW || ly < -halfH || ly > halfH) {
-                    outData[outIdx] = bgR; outData[outIdx+1] = bgG;
-                    outData[outIdx+2] = bgB; outData[outIdx+3] = 255;
-                } else {
-                    var ix = Math.round((lx / logoWmm + 0.5) * imgW - 0.5);
-                    var iy = Math.round((ly / logoHmm + 0.5) * imgH - 0.5);
-                    ix = Math.max(0, Math.min(imgW-1, ix));
-                    iy = Math.max(0, Math.min(imgH-1, iy));
-                    var srcIdx = (iy * imgW + ix) * 4;
-                    var alpha = lpx[srcIdx+3] / 255;
-                    outData[outIdx]   = Math.round(lpx[srcIdx]   * alpha + bgR * (1-alpha));
-                    outData[outIdx+1] = Math.round(lpx[srcIdx+1] * alpha + bgG * (1-alpha));
-                    outData[outIdx+2] = Math.round(lpx[srcIdx+2] * alpha + bgB * (1-alpha));
-                    outData[outIdx+3] = 255;
-                }
-            }
-        }
-        var c = document.createElement('canvas');
-        c.width = fcw; c.height = fch;
-        c.getContext('2d').putImageData(new ImageData(outData, fcw, fch), 0, 0);
-        return c;
-    }
-
-    /* Aplica o logo de um lado ('front'→_outer, 'back'→_inner) a todos os painéis. */
-    function applyLogoForSide(side, callback) {
-        if (!_currentGeo) return;
-        var sf = logoState[side];
-        if (!sf.dataUrl || !sf.dieline) {
-            /* Sem logo neste lado — repor cor base nos meshes correspondentes */
-            var suffix = side === 'front' ? '_outer' : '_inner';
-            var threeSide = side === 'front' ? THREE.FrontSide : THREE.BackSide;
-            Object.keys(meshMap).forEach(function(faceKey) {
-                if (!faceKey.endsWith(suffix)) return;
-                var baseKey = faceKey.replace(suffix, '');
-                var fc = faceBaseColor[baseKey] || COL_WALL;
-                meshMap[faceKey].material = makeMatSide(fc, threeSide, meshMap[faceKey].userData.order || 0);
-            });
-            if (callback) callback();
-            return;
-        }
-
-        var u = _currentGeo.unit || 1;
-        var logoPx = sf.sizeMM * u;
-        var logoPosInDieline = sf.dieline;
-        var savedRot = logoRot;
-        var savedStripped = _logoStripped;
-        logoRot = sf.rot;           /* buildPanelLogoTexture usa logoRot global */
-        _logoStripped = sf.stripped; /* idem para _logoStripped */
-
-        function doApply(img) {
-            var nodeLocalMap = {};
-            _currentGeo.nodes.forEach(function(node) {
-                if (node._localPts && node._svgToLocal) {
-                    nodeLocalMap[node.key] = {
-                        localPts: node._localPts,
-                        svgToLocal: node._svgToLocal,
-                        localAngle: node._localAngle || 0,
-                    };
-                }
-            });
-
-            var suffix    = side === 'front' ? '_outer' : '_inner';
-            var threeSide = side === 'front' ? THREE.FrontSide : THREE.BackSide;
-
-            Object.keys(meshMap).forEach(function(faceKey) {
-                if (!faceKey.endsWith(suffix)) return;
-                var baseKey = faceKey.replace(suffix, '');
-                var mesh = meshMap[faceKey];
-                if (!mesh) return;
-
-                if (faceBaseColor[baseKey] === undefined) {
-                    var outerMesh = meshMap[baseKey + '_outer'];
-                    faceBaseColor[baseKey] = outerMesh && outerMesh.material && outerMesh.material.color
-                        ? outerMesh.material.color.getHex() : COL_WALL;
-                }
-                var fc = faceBaseColor[baseKey];
-                var nodeLocal = nodeLocalMap[baseKey];
-                if (!nodeLocal) {
-                    mesh.material = makeMatSide(fc, threeSide, mesh.userData.order || 0);
-                    return;
-                }
-
-                var texCanvas = buildPanelLogoTexture(nodeLocal.localPts, nodeLocal.svgToLocal, nodeLocal.localAngle, fc, img, logoPosInDieline, logoPx);
-                if (texCanvas) {
-                    var tex = new THREE.CanvasTexture(texCanvas);
-                    tex.flipY = false;
-                    if (side === 'front') {
-                        /* _outer usa FrontSide: UVs crescem com s, mas o _inner com
-                           BackSide vê o verso e des-espelha naturalmente. Para _outer
-                           aplicar o mesmo efeito, espelhar a textura em U. */
-                        tex.repeat.x = -1;
-                        tex.offset.x = 1;
-                    }
-                    normaliseFaceUVs(mesh.geometry);
-                    mesh.material = new THREE.MeshLambertMaterial(applyPolyOffset(
-                        { map: tex, side: threeSide }, mesh.userData.order || 0));
-                } else {
-                    mesh.material = makeMatSide(fc, threeSide, mesh.userData.order || 0);
-                }
-            });
-
-            logoRot = savedRot;
-            _logoStripped = savedStripped;
-            if (callback) callback();
-        }
-
-        if (sf.img && sf.img.complete && sf.img.src === sf.dataUrl) {
-            doApply(sf.img);
-        } else {
-            sf.stripped = null;
-            var img = new Image();
-            img.onload = function() {
-                sf.img = img;
-                sf.stripped = stripWhiteBackground(img);
-                doApply(img);
-            };
-            img.src = sf.dataUrl;
-        }
-    }
-
-    function applyLogoToAllFaces() {
-        applyLogoForSide('front');
-        applyLogoForSide('back');
-    }
-
-    function clearLogo() {
-        /* Limpa só o lado activo */
-        var sf = ls();
-        sf.dataUrl = null; sf.dieline = null; sf.img = null; sf.stripped = null;
-        sf.sizeMM = 80; sf.rot = 0;
-        syncLegacy();
-        applyLogoForSide(logoSide);
-        render2dLogo();
-    }
-
-    function updateArtworkPanel() {
-        var sf = ls();
-        var preview  = document.getElementById('atp-artwork-preview');
-        var btnRemove = document.getElementById('atp-artwork-remove');
-        var has = !!(sf.dataUrl);
-        if (preview) {
-            preview.src = has ? sf.dataUrl : '';
-            preview.style.display = has ? 'block' : 'none';
-        }
-        if (btnRemove) btnRemove.style.display = has ? '' : 'none';
-        var rotRow   = document.getElementById('atp-artwork-rot-row');
-        var rotLabel = document.getElementById('atp-artwork-rot-label');
-        if (rotRow) rotRow.style.display = has ? '' : 'none';
-        if (rotLabel) rotLabel.textContent = (sf.rot || 0) + '°';
-        var scaleRow = document.getElementById('atp-artwork-scale-row');
-        var scaleLabel = document.getElementById('atp-artwork-scale-label');
-        if (scaleRow) scaleRow.style.display = has ? '' : 'none';
-        if (scaleLabel) scaleLabel.textContent = Math.round(sf.sizeMM || 80) + 'mm';
-        var dragHint = document.getElementById('atp-artwork-drag-hint');
-        if (dragHint) dragHint.style.display = has ? '' : 'none';
-        var gotoBtn = document.getElementById('atp-goto-logo2d');
-        if (gotoBtn) gotoBtn.style.display = has ? '' : 'none';
-    }
-
-    /* ── RAYCASTING (apenas hover highlight no 3D — sem drag) ────── */
-    function initRaycasting() {
-        var raycaster = new THREE.Raycaster();
-        var mouse = new THREE.Vector2();
-        var hoveredMesh = null;
-
-        var COPLANAR_EPS = 0.5;
-
-        function setEmissive(mesh, hex) {
-            if (mesh && mesh.material && mesh.material.emissive) mesh.material.emissive.setHex(hex);
-        }
-        function hitOrder(h) { return (h.object && h.object.userData && h.object.userData.order) || 0; }
-        function facesCamera(h) {
-            if (!h.face) return true;
-            var n = new THREE.Vector3().copy(h.face.normal).transformDirection(h.object.matrixWorld);
-            return n.dot(camera.position.clone().sub(h.point)) > 0;
-        }
-        function pickVisibleHit(hits) {
-            if (!hits.length) return null;
-            var visible = hits.filter(facesCamera);
-            if (!visible.length) visible = hits;
-            var front = visible[0], best = front;
-            for (var i = 1; i < visible.length; i++) {
-                if (visible[i].distance - front.distance > COPLANAR_EPS) break;
-                if (hitOrder(visible[i]) > hitOrder(best)) best = visible[i];
-            }
-            return best;
-        }
-        function selectableMeshes() {
-            var boxClosed = animT >= 0.95;
-            return Object.values(meshMap).filter(function (m) {
-                if (m.userData.selectable === false) return false;
-                if (boxClosed && m.userData.isHidingFlap) return false;
-                return true;
-            });
-        }
-        function getRayHit(e) {
-            var rect = c3.getBoundingClientRect();
-            mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-            mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-            raycaster.setFromCamera(mouse, camera);
-            return pickVisibleHit(raycaster.intersectObjects(selectableMeshes(), false)) || null;
-        }
-
-        c3.addEventListener('mousemove', function (e) {
-            var vh = getRayHit(e);
-            var hit = vh ? vh.object : null;
-            if (hit !== hoveredMesh) {
-                setEmissive(hoveredMesh, 0x000000);
-                hoveredMesh = hit;
-                setEmissive(hoveredMesh, 0x1b3a5c);
-            }
-            c3.style.cursor = hit ? 'pointer' : 'default';
-        });
-        c3.addEventListener('mouseleave', function () {
-            setEmissive(hoveredMesh, 0x000000);
-            hoveredMesh = null;
-            c3.style.cursor = 'default';
-        });
-    }
-
-    /* ── VISTA 2D LOGO ──────────────────────────────────────────────
-       Renderiza o dieline parametrizado num canvas 2D.
-       O logo é arrastável directamente sobre o dieline (coords SVG px).
-       Frente = dieline normal; Verso = espelhado horizontalmente.
-    ─────────────────────────────────────────────────────────────── */
-    var c2logo = null; /* canvas#canvas2dlogo */
-    var ctx2logo = null;
-    var _svgBgImage = null;       /* Image com o SVG actual para fundo do canvas 2D Logo */
-    var _svgBgImageSrc = null;    /* src usado para detectar mudanças */
-
-    /* Cor do cartão em CSS para o canvas 2D */
-    var CARD_FILL   = '#e3d3b8';
-    var CARD_STROKE = '#a0895c';
-    var FOLD_COLOR  = '#3b82f6';
-    var CUT_COLOR   = '#ef4444';
-
-    /* Desenha o dieline no canvas 2D Logo.
-       O canvas usa coordenadas de ecrã; o dieline (em px SVG) é transformado
-       por: ecrãX = panOffX + svgX * panScale * logo2dZoom
-       Usa os nodes e as suas arestas do _currentGeo para desenhar os painéis.
-    */
-    /* Remove elementos verdes (medidas) do SVG antes de renderizar no canvas.
-       Filtra por cor de stroke/fill que seja verde (#00xx00 / rgb(0,x,0) / "green" etc.)
-       e também por grupos com id que contenha "meas", "dim", "annotation", "ruler". */
-    function stripMeasurementLines(svgText) {
-        try {
-            var parser = new DOMParser();
-            var doc = parser.parseFromString(svgText, 'image/svg+xml');
-            if (doc.querySelector('parsererror')) return svgText;
-
-            /* Padrão de cor verde: qualquer variante que não seja vermelho (#ff…) nem azul (#…ff) */
-            function isGreenish(color) {
-                if (!color) return false;
-                color = color.toLowerCase().trim();
-                if (color === 'green' || color === 'lime' || color === '#00ff00' || color === '#008000') return true;
-                /* #RRGGBB ou #RGB onde G >> R e G >> B */
-                var m6 = color.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/);
-                if (m6) {
-                    var r = parseInt(m6[1], 16), g = parseInt(m6[2], 16), b = parseInt(m6[3], 16);
-                    return g > 80 && g > r * 2 && g > b * 2;
-                }
-                var m3 = color.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
-                if (m3) {
-                    var r2 = parseInt(m3[1] + m3[1], 16), g2 = parseInt(m3[2] + m3[2], 16), b2 = parseInt(m3[3] + m3[3], 16);
-                    return g2 > 80 && g2 > r2 * 2 && g2 > b2 * 2;
-                }
-                var rgb = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-                if (rgb) {
-                    var rr = +rgb[1], gg = +rgb[2], bb = +rgb[3];
-                    return gg > 80 && gg > rr * 2 && gg > bb * 2;
-                }
-                return false;
-            }
-
-            function shouldRemove(el) {
-                /* Por ID do grupo */
-                var id = (el.id || el.getAttribute('id') || '').toLowerCase();
-                if (/meas|dimen|annot|ruler|arrow|label/.test(id)) return true;
-                /* Por cor do elemento ou do seu grupo pai */
-                var stroke = el.getAttribute('stroke') || '';
-                var fill   = el.getAttribute('fill')   || '';
-                if (isGreenish(stroke) || isGreenish(fill)) return true;
-                /* Ver estilo inline */
-                var style  = el.getAttribute('style')  || '';
-                var sm = style.match(/stroke\s*:\s*([^;]+)/);
-                var fm = style.match(/fill\s*:\s*([^;]+)/);
-                if (sm && isGreenish(sm[1])) return true;
-                if (fm && isGreenish(fm[1])) return true;
-                return false;
-            }
-
-            var toRemove = [];
-            doc.querySelectorAll('g, line, path, polyline, polygon, rect, circle, ellipse, text').forEach(function (el) {
-                if (shouldRemove(el)) toRemove.push(el);
-            });
-            toRemove.forEach(function (el) { if (el.parentNode) el.parentNode.removeChild(el); });
-
-            return new XMLSerializer().serializeToString(doc);
-        } catch (e) {
-            return svgText;
-        }
-    }
-
-    /* Constrói (ou reutiliza) a Image do SVG actual para o fundo do canvas 2D Logo.
-       cb(img) é chamado quando a imagem está pronta (pode ser síncrono se já em cache). */
-    function getSvgBgImage(cb) {
-        var svgText = svgTextCache;
-        if (!svgText) { cb(null); return; }
-
-        /* Reutilizar se já foi carregado com o mesmo conteúdo */
-        if (_svgBgImage && _svgBgImageSrc === svgText) {
-            cb(_svgBgImage);
-            return;
-        }
-
-        var cleanSvg = stripMeasurementLines(svgText);
-        /* Usar data-URL para evitar restrições CORS no drawImage */
-        var encoded = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(cleanSvg);
-        var img = new Image();
-        img.onload = function () {
-            if (_svgBgImageSrc !== svgText) { cb(null); return; }
-            _svgBgImage    = img;
-            cb(img);
-        };
-        img.onerror = function () { cb(null); };
-        _svgBgImageSrc = svgText;
-        img.src = encoded;
-    }
-
-    /* Invalida a cache da imagem SVG de fundo (chamar quando o SVG muda). */
-    function invalidateSvgBgCache() {
-        _svgBgImage    = null;
-        _svgBgImageSrc = null;
-    }
-
-    function render2dLogo() {
-        if (!c2logo || !ctx2logo) return;
-        syncLegacy(); /* garantir que as vars legadas reflectem o lado activo */
-        var cw = c2logo.width, ch = c2logo.height;
-        ctx2logo.clearRect(0, 0, cw, ch);
-        if (!_currentGeo || !_currentGeo.nodes || !_currentGeo.nodes.length) return;
-
-        /* Calcular bbox do dieline a partir do SVG viewBox (se disponível) ou dos nodes */
-        var svgVB = null;
-        if (svgTextCache) {
-            var vbMatch = svgTextCache.match(/viewBox\s*=\s*["']([^"']+)["']/);
-            if (vbMatch) {
-                var parts = vbMatch[1].trim().split(/[\s,]+/).map(Number);
-                if (parts.length === 4 && !parts.some(isNaN)) {
-                    svgVB = { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
-                }
-            }
-        }
-        var dlW, dlH, allMinX, allMinY;
-        if (svgVB) {
-            allMinX = svgVB.x; allMinY = svgVB.y;
-            dlW = svgVB.w; dlH = svgVB.h;
-        } else {
-            allMinX = Infinity; allMinY = Infinity;
-            var allMaxX = -Infinity, allMaxY = -Infinity;
-            _currentGeo.nodes.forEach(function (node) {
-                node.points.forEach(function (p) {
-                    allMinX = Math.min(allMinX, p.x); allMinY = Math.min(allMinY, p.y);
-                    allMaxX = Math.max(allMaxX, p.x); allMaxY = Math.max(allMaxY, p.y);
-                });
-            });
-            dlW = allMaxX - allMinX || 1; dlH = allMaxY - allMinY || 1;
-        }
-
-        /* Escala base (fit no canvas com margem) */
-        var MARGIN = 40;
-        var baseScale = Math.min((cw - 2*MARGIN) / dlW, (ch - 2*MARGIN) / dlH);
-        var scale = baseScale * logo2dZoom;
-        logo2dScale = scale;
-
-        /* Pan: centrado por default (logo2dPan = {0,0} → centrado) */
-        var offX = (cw - dlW * scale) / 2 + logo2dPan.x;
-        var offY = (ch - dlH * scale) / 2 + logo2dPan.y;
-        logo2dOffMM = { x: allMinX - offX / scale, y: allMinY - offY / scale };
-
-        /* Transformação SVG px → canvas px */
-        function tx(svgX) { return offX + (svgX - allMinX) * scale; }
-        function ty(svgY) { return offY + (svgY - allMinY) * scale; }
-
-        /* Fundo */
-        ctx2logo.fillStyle = '#f8fafc';
-        ctx2logo.fillRect(0, 0, cw, ch);
-
-        /* Dieline: desenhar o SVG original como imagem (igual ao 2D view) */
-        function drawDielineBg(img) {
-            if (img) {
-                ctx2logo.drawImage(img, offX, offY, dlW * scale, dlH * scale);
-            } else {
-                /* Fallback: redesenhar manualmente caso o SVG não esteja disponível */
-                _currentGeo.nodes.forEach(function (node) {
-                    var pts = node.points;
-                    if (!pts || pts.length < 2) return;
-                    ctx2logo.beginPath();
-                    ctx2logo.moveTo(tx(pts[0].x), ty(pts[0].y));
-                    for (var i = 1; i < pts.length; i++) ctx2logo.lineTo(tx(pts[i].x), ty(pts[i].y));
-                    ctx2logo.closePath();
-                    ctx2logo.fillStyle = CARD_FILL;
-                    ctx2logo.fill();
-                    ctx2logo.strokeStyle = CUT_COLOR;
-                    ctx2logo.lineWidth = 1.5;
-                    ctx2logo.stroke();
-                });
-                _currentGeo.nodes.forEach(function (node) {
-                    if (!node.edge) return;
-                    ctx2logo.beginPath();
-                    ctx2logo.moveTo(tx(node.edge.x1), ty(node.edge.y1));
-                    ctx2logo.lineTo(tx(node.edge.x2), ty(node.edge.y2));
-                    ctx2logo.strokeStyle = FOLD_COLOR;
-                    ctx2logo.lineWidth = 1.5;
-                    ctx2logo.setLineDash([6, 4]);
-                    ctx2logo.stroke();
-                    ctx2logo.setLineDash([]);
-                });
-            }
-
-            /* Logo sobre o dieline */
-            if (logoDataUrl && logoDieline) {
-                var lx = tx(logoDieline.x), ly = ty(logoDieline.y);
-                var u = _currentGeo.unit || 1;
-                var lw = logoSizeMM * u * scale;
-                var imgH2 = lw;
-                if (_logoImg && _logoImg.complete) {
-                    imgH2 = lw / (_logoImg.naturalWidth / _logoImg.naturalHeight);
-                }
-                ctx2logo.save();
-                ctx2logo.translate(lx, ly);
-                ctx2logo.rotate(logoRot * Math.PI / 180);
-                ctx2logo.globalAlpha = 0.9;
-                if (_logoImg && _logoImg.complete) {
-                    ctx2logo.drawImage(_logoImg, -lw/2, -imgH2/2, lw, imgH2);
-                }
-                ctx2logo.globalAlpha = 1;
-                /* bounding box do logo */
-                ctx2logo.strokeStyle = '#1d4ed8';
-                ctx2logo.lineWidth = 1.5;
-                ctx2logo.setLineDash([4, 3]);
-                ctx2logo.strokeRect(-lw/2, -imgH2/2, lw, imgH2);
-                ctx2logo.setLineDash([]);
-                /* handle de drag: círculo central */
-                ctx2logo.beginPath();
-                ctx2logo.arc(0, 0, 6, 0, Math.PI * 2);
-                ctx2logo.fillStyle = '#1d4ed8';
-                ctx2logo.fill();
-                ctx2logo.restore();
-            }
-        }
-
-        getSvgBgImage(function (img) {
-            /* Limpar e redesenhar (assíncrono após carregamento) */
-            ctx2logo.clearRect(0, 0, cw, ch);
-            ctx2logo.fillStyle = '#f8fafc';
-            ctx2logo.fillRect(0, 0, cw, ch);
-            drawDielineBg(img);
-        });
-    }
-
-    /* Inicializar o canvas 2D Logo e os seus eventos */
-    function initLogo2dView() {
-        c2logo = document.getElementById('canvas2dlogo');
-        if (!c2logo) return;
-        ctx2logo = c2logo.getContext('2d');
-
-        /* Ajustar tamanho ao container */
-        function resizeLogo2d() {
-            var wrap = document.getElementById('atp-logo2d-wrap');
-            if (!wrap) return;
-            c2logo.width  = wrap.clientWidth  || 800;
-            c2logo.height = wrap.clientHeight || 600;
-            render2dLogo();
-        }
-        var resizeObs = window.ResizeObserver ? new ResizeObserver(resizeLogo2d) : null;
-        if (resizeObs) resizeObs.observe(document.getElementById('atp-logo2d-wrap') || document.body);
-        window.addEventListener('resize', resizeLogo2d);
-
-        /* Converter coords do canvas → SVG px do dieline (frente/verso) */
-        function canvasToSvg(canvasX, canvasY) {
-            if (!_currentGeo) return { x: 0, y: 0 };
-            var allMinX = Infinity, allMinY = Infinity, allMaxX = -Infinity, allMaxY = -Infinity;
-            _currentGeo.nodes.forEach(function (node) {
-                node.points.forEach(function (p) {
-                    allMinX = Math.min(allMinX, p.x); allMinY = Math.min(allMinY, p.y);
-                    allMaxX = Math.max(allMaxX, p.x); allMaxY = Math.max(allMaxY, p.y);
-                });
-            });
-            var dlW = allMaxX - allMinX || 1, dlH = allMaxY - allMinY || 1;
-            var MARGIN = 40;
-            var baseScale = Math.min((c2logo.width - 2*MARGIN) / dlW, (c2logo.height - 2*MARGIN) / dlH);
-            var scale = baseScale * logo2dZoom;
-            var offX = (c2logo.width  - dlW * scale) / 2 + logo2dPan.x;
-            var offY = (c2logo.height - dlH * scale) / 2 + logo2dPan.y;
-            var svgX, svgY;
-            svgX = allMinX + (canvasX - offX) / scale;
-            svgY = allMinY + (canvasY - offY) / scale;
-            return { x: svgX, y: svgY };
-        }
-
-        /* Detectar se o clique é sobre o logo (para drag vs. pan) */
-        function isOverLogo(canvasX, canvasY) {
-            var sf = ls();
-            if (!sf.dieline || !sf.dataUrl) return false;
-            var pt = canvasToSvg(canvasX, canvasY);
-            var u = (_currentGeo && _currentGeo.unit) || 1;
-            var halfW = ((sf.sizeMM || 80) * u) / 2;
-            var halfH = halfW / ((sf.img && sf.img.naturalWidth / sf.img.naturalHeight) || 1);
-            var dx = pt.x - sf.dieline.x, dy = pt.y - sf.dieline.y;
-            var rad = (sf.rot || 0) * Math.PI / 180;
-            var lx = dx * Math.cos(rad) + dy * Math.sin(rad);
-            var ly = -dx * Math.sin(rad) + dy * Math.cos(rad);
-            return Math.abs(lx) <= halfW * 1.3 && Math.abs(ly) <= halfH * 1.3;
-        }
-
-        var dragging = false; /* a arrastar o logo */
-        var panning  = false; /* a fazer pan do canvas */
-        var dragOff  = { x: 0, y: 0 }; /* offset logo → clique */
-        var panStart = { x: 0, y: 0, px: 0, py: 0 };
-
-        c2logo.addEventListener('mousedown', function (e) {
-            var rect = c2logo.getBoundingClientRect();
-            var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-            if (isOverLogo(cx, cy)) {
-                dragging = true;
-                var pt = canvasToSvg(cx, cy);
-                var sf = ls();
-                dragOff.x = pt.x - sf.dieline.x;
-                dragOff.y = pt.y - sf.dieline.y;
-                c2logo.style.cursor = 'grabbing';
-            } else {
-                panning = true;
-                panStart.x = e.clientX; panStart.y = e.clientY;
-                panStart.px = logo2dPan.x; panStart.py = logo2dPan.y;
-                c2logo.style.cursor = 'grabbing';
-            }
-        });
-
-        window.addEventListener('mousemove', function (e) {
-            if (!dragging && !panning) return;
-            var rect = c2logo.getBoundingClientRect();
-            var cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-            if (dragging && ls().dieline) {
-                var pt = canvasToSvg(cx, cy);
-                var sf = ls();
-                sf.dieline.x = pt.x - dragOff.x;
-                sf.dieline.y = pt.y - dragOff.y;
-                syncLegacy();
-                render2dLogo();
-                applyLogoForSide(logoSide);
-            } else if (panning) {
-                logo2dPan.x = panStart.px + (e.clientX - panStart.x);
-                logo2dPan.y = panStart.py + (e.clientY - panStart.y);
-                render2dLogo();
-            }
-        });
-
-        window.addEventListener('mouseup', function () {
-            dragging = false; panning = false;
-            if (c2logo) c2logo.style.cursor = ls().dieline ? 'grab' : 'crosshair';
-        });
-
-        c2logo.addEventListener('mousemove', function (e) {
-            if (dragging || panning) return;
-            var rect = c2logo.getBoundingClientRect();
-            c2logo.style.cursor = isOverLogo(e.clientX - rect.left, e.clientY - rect.top)
-                ? 'grab' : 'crosshair';
-        });
-
-        c2logo.addEventListener('wheel', function (e) {
-            e.preventDefault();
-            var factor = e.deltaY < 0 ? 1.1 : 0.9;
-            logo2dZoom = Math.max(0.2, Math.min(8, logo2dZoom * factor));
-            render2dLogo();
-        }, { passive: false });
-
-        /* Touch */
-        var touchStartLogo = null, touchStartPan = null;
-        c2logo.addEventListener('touchstart', function (e) {
-            if (e.touches.length !== 1) return;
-            e.preventDefault();
-            var t = e.touches[0];
-            var rect = c2logo.getBoundingClientRect();
-            var cx = t.clientX - rect.left, cy = t.clientY - rect.top;
-            if (isOverLogo(cx, cy)) {
-                var pt = canvasToSvg(cx, cy);
-                var sf = ls();
-                touchStartLogo = { offX: pt.x - sf.dieline.x, offY: pt.y - sf.dieline.y };
-            } else {
-                touchStartPan = { ex: t.clientX, ey: t.clientY, px: logo2dPan.x, py: logo2dPan.y };
-            }
-        }, { passive: false });
-
-        c2logo.addEventListener('touchmove', function (e) {
-            if (e.touches.length !== 1) return;
-            e.preventDefault();
-            var t = e.touches[0];
-            var rect = c2logo.getBoundingClientRect();
-            var cx = t.clientX - rect.left, cy = t.clientY - rect.top;
-            if (touchStartLogo && ls().dieline) {
-                var pt = canvasToSvg(cx, cy);
-                var sf = ls();
-                sf.dieline.x = pt.x - touchStartLogo.offX;
-                sf.dieline.y = pt.y - touchStartLogo.offY;
-                syncLegacy();
-                render2dLogo(); applyLogoForSide(logoSide);
-            } else if (touchStartPan) {
-                logo2dPan.x = touchStartPan.px + (t.clientX - touchStartPan.ex);
-                logo2dPan.y = touchStartPan.py + (t.clientY - touchStartPan.ey);
-                render2dLogo();
-            }
-        }, { passive: false });
-
-        c2logo.addEventListener('touchend', function () {
-            touchStartLogo = null; touchStartPan = null;
-        });
-
-        /* Botões da toolbar */
-        var btnFront = document.getElementById('logo2d-side-front');
-        var btnBack  = document.getElementById('logo2d-side-back');
-        if (btnFront) btnFront.addEventListener('click', function () {
-            logoSide = 'front';
-            syncLegacy();
-            btnFront.classList.add('active'); if (btnBack) btnBack.classList.remove('active');
-            render2dLogo();
-            updateArtworkPanel();
-        });
-        if (btnBack) btnBack.addEventListener('click', function () {
-            logoSide = 'back';
-            syncLegacy();
-            btnBack.classList.add('active'); if (btnFront) btnFront.classList.remove('active');
-            render2dLogo();
-            updateArtworkPanel();
-        });
-        var btnZIn  = document.getElementById('logo2d-zoom-in');
-        var btnZOut = document.getElementById('logo2d-zoom-out');
-        var btnZFit = document.getElementById('logo2d-zoom-fit');
-        if (btnZIn)  btnZIn.addEventListener('click',  function () { logo2dZoom = Math.min(8, logo2dZoom * 1.25); render2dLogo(); });
-        if (btnZOut) btnZOut.addEventListener('click', function () { logo2dZoom = Math.max(0.2, logo2dZoom * 0.8); render2dLogo(); });
-        if (btnZFit) btnZFit.addEventListener('click', function () { logo2dZoom = 1; logo2dPan.x = 0; logo2dPan.y = 0; render2dLogo(); });
-
-        resizeLogo2d();
-    }
-
-    /* Carregar artwork guardado do backend */
-    function loadArtwork(productId) {
-        if (!productId) return;
-        fetch('/dieline/artwork/load?product_id=' + productId)
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                data = data || {};
-                var pending = 0;
-                ['front', 'back'].forEach(function(side) {
-                    var key = side === 'front' ? '__logo__' : '__logo_back__';
-                    var s = data[key];
-                    if (!s || !s.dataUrl) return;
-                    var sf = logoState[side];
-                    sf.dataUrl = s.dataUrl;
-                    sf.dieline = s.dielineX != null ? { x: s.dielineX, y: s.dielineY } : null;
-                    sf.sizeMM  = s.sizeMM || 80;
-                    sf.rot     = s.rot    || 0;
-                    if (!sf.dieline && _currentGeo) {
-                        var allMinX = Infinity, allMaxX = -Infinity, allMinY = Infinity, allMaxY = -Infinity;
-                        _currentGeo.nodes.forEach(function (n) { n.points.forEach(function (p) {
-                            allMinX = Math.min(allMinX, p.x); allMaxX = Math.max(allMaxX, p.x);
-                            allMinY = Math.min(allMinY, p.y); allMaxY = Math.max(allMaxY, p.y);
-                        }); });
-                        sf.dieline = { x: (allMinX + allMaxX) / 2, y: (allMinY + allMaxY) / 2 };
-                    }
-                    pending++;
-                    var img = new Image();
-                    var capSide = side;
-                    img.onload = function () {
-                        logoState[capSide].img = img;
-                        logoState[capSide].stripped = stripWhiteBackground(img);
-                        applyLogoForSide(capSide, function() {
-                            pending--;
-                            if (pending === 0) {
-                                syncLegacy();
-                                render2dLogo();
-                                updateArtworkPanel();
-                            }
-                        });
-                    };
-                    img.src = sf.dataUrl;
-                });
-            })
-            .catch(function () {});
-    }
-
-    /* Guardar artwork no backend */
-    function saveArtwork(productId) {
-        if (!productId) return;
-        var payload = {};
-        var sf = logoState.front;
-        if (sf.dataUrl && sf.dieline) {
-            payload.__logo__ = {
-                dataUrl: sf.dataUrl,
-                dielineX: sf.dieline.x, dielineY: sf.dieline.y,
-                sizeMM: sf.sizeMM || 80, rot: sf.rot || 0,
-            };
-        }
-        var sb = logoState.back;
-        if (sb.dataUrl && sb.dieline) {
-            payload.__logo_back__ = {
-                dataUrl: sb.dataUrl,
-                dielineX: sb.dieline.x, dielineY: sb.dieline.y,
-                sizeMM: sb.sizeMM || 80, rot: sb.rot || 0,
-            };
-        }
-        fetch('/dieline/artwork/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', method: 'call', params: { product_id: productId, artwork: payload } }),
-        })
-        .then(function (r) { return r.json(); })
-        .then(function (res) {
-            var ok = res.result && res.result.ok;
-            var msg = document.getElementById('atp-artwork-save-msg');
-            if (msg) { msg.textContent = ok ? 'Guardado!' : 'Erro ao guardar'; msg.style.display = ''; setTimeout(function () { msg.style.display = 'none'; }, 2000); }
-        })
-        .catch(function () {});
-    }
-
-    /* Carrega artwork a partir de um objecto JSON (usado no preview de encomenda). */
-    function loadArtworkFromJson(jsonObj) {
-        var data = (typeof jsonObj === 'string') ? JSON.parse(jsonObj) : jsonObj;
-        if (!data) return;
-        var pending = 0;
-        ['front', 'back'].forEach(function(side) {
-            var key = side === 'front' ? '__logo__' : '__logo_back__';
-            var s = data[key];
-            if (!s || !s.dataUrl) return;
-            var sf = logoState[side];
-            sf.dataUrl = s.dataUrl;
-            sf.dieline = s.dielineX != null ? { x: s.dielineX, y: s.dielineY } : null;
-            sf.sizeMM  = s.sizeMM || 80;
-            sf.rot     = s.rot    || 0;
-            if (!sf.dieline && _currentGeo) {
-                var allMinX = Infinity, allMaxX = -Infinity, allMinY = Infinity, allMaxY = -Infinity;
-                _currentGeo.nodes.forEach(function(n) { n.points.forEach(function(p) {
-                    allMinX = Math.min(allMinX, p.x); allMaxX = Math.max(allMaxX, p.x);
-                    allMinY = Math.min(allMinY, p.y); allMaxY = Math.max(allMaxY, p.y);
-                }); });
-                sf.dieline = { x: (allMinX + allMaxX) / 2, y: (allMinY + allMaxY) / 2 };
-            }
-            pending++;
-            var img = new Image();
-            var capSide = side;
-            img.onload = function() {
-                logoState[capSide].img = img;
-                logoState[capSide].stripped = stripWhiteBackground(img);
-                applyLogoForSide(capSide, function() {
-                    pending--;
-                    if (pending === 0) { syncLegacy(); render2dLogo(); updateArtworkPanel(); }
-                });
-            };
-            img.src = sf.dataUrl;
-        });
-    }
-
-    /* Gera um SVG vectorial (string) do dieline com o logo do lado indicado.
-       Coordenadas em mm reais. Logo embutido como <image> base64. */
-    function exportDielineSVG(side) {
-        if (!_currentGeo || !_currentGeo.nodes || !_currentGeo.nodes.length) return '';
-
-        var geo = _currentGeo;
-        var unit = geo.unit || 1; /* px por mm no SVG de origem */
-
-        /* Bbox total em coords SVG (mm × unit) */
-        var allMinX = Infinity, allMinY = Infinity, allMaxX = -Infinity, allMaxY = -Infinity;
-        geo.nodes.forEach(function(node) {
-            node.points.forEach(function(p) {
-                allMinX = Math.min(allMinX, p.x); allMinY = Math.min(allMinY, p.y);
-                allMaxX = Math.max(allMaxX, p.x); allMaxY = Math.max(allMaxY, p.y);
-            });
-        });
-        var dlW = allMaxX - allMinX || 1;
-        var dlH = allMaxY - allMinY || 1;
-
-        /* SVG em mm: 1 unit SVG px = 1/unit mm */
-        var scaleToMM = 1 / unit;
-        var PAD = 5; /* mm de margem */
-        var svgW = dlW * scaleToMM + PAD * 2;
-        var svgH = dlH * scaleToMM + PAD * 2;
-
-        function r2(n) { return Math.round(n * 100) / 100; }
-
-        /* Converter coord SVG px → mm no output (sem espelhamento) */
-        function mx(svgX) { return r2(PAD + (svgX - allMinX) * scaleToMM); }
-        function my(svgY) { return r2(PAD + (svgY - allMinY) * scaleToMM); }
-
-        var lines = [];
-        lines.push('<?xml version="1.0" encoding="UTF-8"?>');
-        lines.push('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"');
-        lines.push('     width="' + r2(svgW) + 'mm" height="' + r2(svgH) + 'mm"');
-        lines.push('     viewBox="0 0 ' + r2(svgW) + ' ' + r2(svgH) + '">');
-
-        /* Estilos */
-        lines.push('<style>');
-        lines.push('.panel{fill:#f0ede8;stroke:#cc2200;stroke-width:0.3}');
-        lines.push('.fold{stroke:#0066cc;stroke-width:0.3;stroke-dasharray:2,1.5;fill:none}');
-        lines.push('.label{font:2px sans-serif;fill:#64748b;text-anchor:middle;dominant-baseline:middle}');
-        lines.push('</style>');
-
-        /* Painéis */
-        lines.push('<g id="panels">');
-        geo.nodes.forEach(function(node) {
-            var pts = node.points;
-            if (!pts || pts.length < 2) return;
-            var ptStr = pts.map(function(p) { return mx(p.x) + ',' + my(p.y); }).join(' ');
-            lines.push('<polygon class="panel" points="' + ptStr + '"/>');
-        });
-        lines.push('</g>');
-
-        /* Linhas de dobra */
-        lines.push('<g id="folds">');
-        geo.nodes.forEach(function(node) {
-            if (!node.edge) return;
-            lines.push('<line class="fold" x1="' + mx(node.edge.x1) + '" y1="' + my(node.edge.y1) +
-                '" x2="' + mx(node.edge.x2) + '" y2="' + my(node.edge.y2) + '"/>');
-        });
-        lines.push('</g>');
-
-        /* Labels */
-        lines.push('<g id="labels">');
-        geo.nodes.forEach(function(node) {
-            var pts = node.points;
-            if (!pts || !pts.length) return;
-            var cx = 0, cy = 0;
-            pts.forEach(function(p) { cx += p.x; cy += p.y; });
-            cx /= pts.length; cy /= pts.length;
-            var label = node.key.replace(/_/g, ' ');
-            lines.push('<text class="label" x="' + mx(cx) + '" y="' + my(cy) + '">' +
-                label.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</text>');
-        });
-        lines.push('</g>');
-
-        /* Logo */
-        var st = logoState[side];
-        if (st && st.dataUrl && st.dieline) {
-            var logoImg = st.img;
-            var logoPosX = st.dieline.x; /* coords SVG px */
-            var logoPosY = st.dieline.y;
-            var logoSizePxMM = st.sizeMM || 80; /* mm */
-            var logoAspect = (logoImg && logoImg.naturalWidth && logoImg.naturalHeight)
-                ? (logoImg.naturalWidth / logoImg.naturalHeight) : 1;
-            var logoWmm = logoSizePxMM;
-            var logoHmm = logoSizePxMM / logoAspect;
-            var logoXmm = mx(logoPosX);
-            var logoYmm = my(logoPosY);
-            var rot = st.rot || 0;
-            lines.push('<image href="' + st.dataUrl + '"' +
-                ' x="' + r2(logoXmm - logoWmm / 2) + '"' +
-                ' y="' + r2(logoYmm - logoHmm / 2) + '"' +
-                ' width="' + r2(logoWmm) + '"' +
-                ' height="' + r2(logoHmm) + '"' +
-                (rot ? ' transform="rotate(' + r2(rot) + ' ' + r2(logoXmm) + ' ' + r2(logoYmm) + ')"' : '') +
-                '/>');
-        }
-
-        lines.push('</svg>');
-        return lines.join('\n');
-    }
 
     /* Grava a configuração actual na sale.order.dieline e devolve uma Promise
        com o ID do registo criado. Chamado antes do "Add to Cart". */
     function saveOrderDieline() {
-        var artworkPayload = {};
-        var sf = logoState.front;
-        if (sf.dataUrl && sf.dieline) {
-            artworkPayload.__logo__ = {
-                dataUrl: sf.dataUrl,
-                dielineX: sf.dieline.x, dielineY: sf.dieline.y,
-                sizeMM: sf.sizeMM || 80, rot: sf.rot || 0,
-            };
-        }
-        var sb = logoState.back;
-        if (sb.dataUrl && sb.dieline) {
-            artworkPayload.__logo_back__ = {
-                dataUrl: sb.dataUrl,
-                dielineX: sb.dieline.x, dielineY: sb.dieline.y,
-                sizeMM: sb.sizeMM || 80, rot: sb.rot || 0,
-            };
-        }
+        var artworkPayload = (window.ATP_LOGO2D && window.ATP_LOGO2D.exportLogoState)
+            ? window.ATP_LOGO2D.exportLogoState()
+            : {};
         var iL = document.getElementById('iL');
         var iW = document.getElementById('iW');
         var iH = document.getElementById('iH');
-        var svgF = exportDielineSVG('front');
-        var svgB = exportDielineSVG('back');
-        console.log('[dieline] svg_front len=' + svgF.length + ' svg_back len=' + svgB.length + ' geo nodes=' + (_currentGeo ? _currentGeo.nodes.length : 'null'));
         var params = {
             product_id:   _cfg.productId || 0,
             box_type:     _cfg.type      || '',
@@ -1899,8 +829,6 @@
             box_w:        iW ? parseFloat(iW.value) || _cfg.W : _cfg.W,
             box_h:        iH ? parseFloat(iH.value) || _cfg.H : _cfg.H,
             artwork_json: JSON.stringify(artworkPayload),
-            svg_front:    svgF,
-            svg_back:     svgB,
         };
         return fetch('/dieline/order/save', {
             method: 'POST',
@@ -1918,7 +846,6 @@
     wire('ctrl-3d',     function () { setView('3d'); });
     wire('ctrl-2d',     function () { setView('2d'); });
     wire('ctrl-logo2d', function () { setView('logo2d'); });
-    wire('atp-goto-logo2d', function () { setView('logo2d'); });
     wire('ctrl-anim', function () { animPlaying ? stopAnim() : startAnim(); });
     wire('ctrl-rotate', function () { autoRotate = !autoRotate; var el = document.getElementById('ctrl-rotate'); if (el) el.classList.toggle('active', autoRotate); });
     wire('ctrl-zoom-in',  function () { sph.r = Math.max(ZOOM_MIN, sph.r - sceneSize * 0.08); updateCam(); });
@@ -1943,22 +870,114 @@
     window.addEventListener('resize', function () { fitPageHeight(); resizeRenderer(); updateCam(); });
 
 
+    /* ── Texturas de logo no 3D ─────────────────────────────────────
+       Aplica/remove um canvas 2D como textura num mesh específico.
+       meshKey = 'panel_X_outer' ou 'panel_X_inner'
+       ─────────────────────────────────────────────────────────────── */
+    /* Normaliza os UVs de um BufferGeometry para [0,1]×[0,1] com base no bbox actual.
+       ShapeGeometry r128 gera UVs em coordenadas locais (mm) — não normalizados. */
+    function normaliseUVs(geometry) {
+        var uvAttr = geometry.attributes.uv;
+        if (!uvAttr) return;
+        var uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+        for (var i = 0; i < uvAttr.count; i++) {
+            var u = uvAttr.getX(i), v = uvAttr.getY(i);
+            if (u < uMin) uMin = u; if (u > uMax) uMax = u;
+            if (v < vMin) vMin = v; if (v > vMax) vMax = v;
+        }
+        var uRange = uMax - uMin || 1, vRange = vMax - vMin || 1;
+        for (var j = 0; j < uvAttr.count; j++) {
+            uvAttr.setXY(j,
+                (uvAttr.getX(j) - uMin) / uRange,
+                (uvAttr.getY(j) - vMin) / vRange
+            );
+        }
+        uvAttr.needsUpdate = true;
+    }
+
+    /* O root usa rotation.x=PI/2 dentro do boxGroup (rotation.x=-PI/2) +
+       boxPivot(PI) — a combinação faz _outer ficar na face exterior, ao
+       contrário dos filhos onde _inner é o exterior. Corrigir aqui. */
+    function _resolveRootSuffix(meshKey) {
+        if (!_activeGeo) return meshKey;
+        var rootKey = _activeGeo.rootKey;
+        if (!rootKey) return meshKey;
+        /* meshKey = 'panel_X_inner' ou 'panel_X_outer' */
+        var innerSuffix = '_inner', outerSuffix = '_outer';
+        if (meshKey === rootKey + innerSuffix) return rootKey + outerSuffix;
+        if (meshKey === rootKey + outerSuffix) return rootKey + innerSuffix;
+        return meshKey;
+    }
+
+    function applyLogoTexture(meshKey, sourceCanvas) {
+        meshKey = _resolveRootSuffix(meshKey);
+        var mesh = meshMap[meshKey];
+        if (!mesh || !mesh.material) return;
+        /* Normalizar UVs na primeira vez (ShapeGeometry r128 gera UVs em mm, não [0,1]) */
+        if (!mesh._uvsNormalised) {
+            normaliseUVs(mesh.geometry);
+            mesh._uvsNormalised = true;
+        }
+        /* Descartar textura anterior */
+        if (mesh._logoTex) { mesh._logoTex.dispose(); mesh._logoTex = null; }
+        var tex = new THREE.CanvasTexture(sourceCanvas);
+        tex.flipY = false;
+        tex.needsUpdate = true;
+        mesh._logoTex = tex;
+        var side = mesh.material.side;
+        mesh.material.dispose();
+        mesh.material = new THREE.MeshLambertMaterial(applyPolyOffset({
+            map: tex, side: side,
+        }, mesh.userData.order || 0));
+    }
+
+    function clearLogoTexture(meshKey) {
+        meshKey = _resolveRootSuffix(meshKey);
+        var mesh = meshMap[meshKey];
+        if (!mesh || !mesh.material) return;
+        if (mesh._logoTex) { mesh._logoTex.dispose(); mesh._logoTex = null; }
+        /* Restaurar material base (cor kartão) */
+        var color  = (mesh.name && /_outer$/.test(mesh.name)) ? COL_WALL : COL_WALL;
+        mesh.material = makeMatSide(color, mesh.material.side, mesh.userData.order || 0);
+        mesh.material.needsUpdate = true;
+    }
+
     /* API mínima exposta (debug / testes headless) */
     window.ATP_DIELINE = {
         get scene() { return scene; },
         get folds() { return folds; },
+        getGeo:     function () { return _activeGeo; },
+        getMeshMap: function () { return meshMap; },
+        setView:    setView,
+        applyLogoTexture: applyLogoTexture,
+        clearLogoTexture: clearLogoTexture,
         setFold: function (t) { animT = t; updateFolds(t); },
         rebuild: function (L, W, H) {
             var svgText = svgTextCache;
             if (!svgText) return;
             var geo = DielineParser.build(svgText, _cfg.type || 'GENERIC');
             if (!geo.nodes || !geo.nodes.length) return;
+            /* SVGs da BD estão em escala real (1 px = 1 mm, geo.unit=1).
+               Referência original: maior dimensão do panel_0 em px (= mm).
+               Se _cfg.L/W/H estiverem preenchidos usa-os; senão usa bbox do panel_0. */
+            var userMax = Math.max(L || 0, W || 0, H || 0);
+            if (userMax > 0) {
+                var origMax = Math.max(_cfg.L || 0, _cfg.W || 0, _cfg.H || 0);
+                if (origMax <= 0 && geo.nodes[0]) {
+                    var rbb = DielineParser._bbox(geo.nodes[0].points);
+                    origMax = Math.max(rbb.w, rbb.h);
+                }
+                if (origMax > 0) {
+                    geo.unit = origMax / userMax;
+                }
+            }
             stopAnim(); animT = 0; animDir = 1; updateSlider(0);
             buildFromGeometry(geo);
-            sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7;
+            /* não resetar sph.r — o utilizador vê a diferença de tamanho */
             updateCam();
-            render2dLogo();
-            applyLogoToAllFaces();
+            if (window.ATP_LOGO2D && window.ATP_LOGO2D.onGeoReady) {
+                window.ATP_LOGO2D.onGeoReady(geo, svgText);
+            }
         },
     };
 
@@ -1966,7 +985,6 @@
     function boot() {
         if (typeof THREE === 'undefined') { console.error('Three.js não carregado'); return; }
         initThree();
-        initLogo2dView();
 
         var btnApply = document.getElementById('btnApply');
         if (btnApply) {
@@ -1977,100 +995,6 @@
                 window.ATP_DIELINE.rebuild(L, W, H);
             });
         }
-
-        /* Upload de imagem — coloca logo centrado no dieline e muda para a vista 2D Logo */
-        var fileArtwork = document.getElementById('fileArtwork');
-        if (fileArtwork) {
-            fileArtwork.addEventListener('change', function () {
-                if (!this.files[0]) return;
-                var reader = new FileReader();
-                var fileName = this.files[0].name;
-                reader.onload = function (ev) {
-                    /* Guardar no estado do lado activo */
-                    var sf = ls();
-                    sf.dataUrl = ev.target.result;
-                    sf.sizeMM  = 80;
-                    sf.rot     = 0;
-                    /* Centrar o logo no centro geométrico do dieline */
-                    if (_currentGeo) {
-                        var allMinX = Infinity, allMaxX = -Infinity, allMinY = Infinity, allMaxY = -Infinity;
-                        _currentGeo.nodes.forEach(function (n) { n.points.forEach(function (p) {
-                            allMinX = Math.min(allMinX, p.x); allMaxX = Math.max(allMaxX, p.x);
-                            allMinY = Math.min(allMinY, p.y); allMaxY = Math.max(allMaxY, p.y);
-                        }); });
-                        sf.dieline = { x: (allMinX + allMaxX) / 2, y: (allMinY + allMaxY) / 2 };
-                        /* tamanho proporcional ao dieline (≈20% da largura) */
-                        var u = _currentGeo.unit || 1;
-                        sf.sizeMM = Math.round((allMaxX - allMinX) * 0.20 / u);
-                        sf.sizeMM = Math.max(10, Math.min(200, sf.sizeMM));
-                    } else {
-                        sf.dieline = { x: 0, y: 0 };
-                    }
-                    sf.img = null; sf.stripped = null;
-                    var img = new Image();
-                    img.onload = function () {
-                        sf.img = img;
-                        sf.stripped = stripWhiteBackground(img);
-                        syncLegacy();
-                        applyLogoForSide(logoSide);
-                        render2dLogo();
-                        updateArtworkPanel();
-                    };
-                    img.src = sf.dataUrl;
-                    var name = document.getElementById('artworkName');
-                    if (name) name.textContent = fileName;
-                    /* Ir direto para a vista 2D Logo */
-                    setView('logo2d');
-                };
-                reader.readAsDataURL(this.files[0]);
-                this.value = '';
-            });
-        }
-
-        var btnRemove = document.getElementById('atp-artwork-remove');
-        if (btnRemove) {
-            btnRemove.addEventListener('click', function () {
-                clearLogo();
-                updateArtworkPanel();
-            });
-        }
-
-        function rotateArtwork(delta) {
-            var sf = ls();
-            if (!sf.dataUrl) return;
-            sf.rot = (((sf.rot || 0) + delta) % 360 + 360) % 360;
-            syncLegacy();
-            render2dLogo();
-            applyLogoForSide(logoSide);
-            updateArtworkPanel();
-        }
-
-        var btnRotCCW = document.getElementById('atp-artwork-rot-ccw');
-        if (btnRotCCW) btnRotCCW.addEventListener('click', function () { rotateArtwork(-90); });
-        var btnRotCW = document.getElementById('atp-artwork-rot-cw');
-        if (btnRotCW) btnRotCW.addEventListener('click', function () { rotateArtwork(90); });
-
-        function scaleArtwork(factor) {
-            var sf = ls();
-            if (!sf.dataUrl) return;
-            sf.sizeMM = Math.max(5, (sf.sizeMM || 80) * factor);
-            syncLegacy();
-            render2dLogo();
-            applyLogoForSide(logoSide);
-            updateArtworkPanel();
-        }
-
-        var btnScaleDown = document.getElementById('atp-artwork-scale-down');
-        if (btnScaleDown) btnScaleDown.addEventListener('click', function () { scaleArtwork(0.9); });
-        var btnScaleUp = document.getElementById('atp-artwork-scale-up');
-        if (btnScaleUp) btnScaleUp.addEventListener('click', function () { scaleArtwork(1.1); });
-
-        var btnSaveArtwork = document.getElementById('atp-artwork-save');
-        if (btnSaveArtwork) {
-            btnSaveArtwork.addEventListener('click', function () { saveArtwork(_cfg.productId); });
-        }
-
-        initRaycasting();
 
         /* Interceptar o Add to Cart — gravar config dieline antes de submeter */
         var cartForm = document.getElementById('atp-cart-form');
@@ -2103,7 +1027,6 @@
             .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
             .then(function (text) {
                 svgTextCache = text;
-                invalidateSvgBgCache();
                 var geo = DielineParser.build(text, _cfg.type || 'GENERIC');
                 if (!geo.nodes || !geo.nodes.length) { showEmpty('Dieline sem painéis válidos.'); return; }
                 /* Em preview de encomenda as medidas vêm da order (já nos inputs via
@@ -2119,11 +1042,9 @@
                 buildFromGeometry(geo);
                 sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7;
                 updateCam();
-                if (_cfg.orderArtworkJson) {
-                    /* Modo preview de encomenda: carregar artwork da config guardada */
-                    loadArtworkFromJson(_cfg.orderArtworkJson);
-                } else {
-                    loadArtwork(_cfg.productId);
+                /* Notificar o Logo2D após o geo estar montado */
+                if (window.ATP_LOGO2D && window.ATP_LOGO2D.onGeoReady) {
+                    window.ATP_LOGO2D.onGeoReady(geo, text);
                 }
             })
             .catch(function (err) {

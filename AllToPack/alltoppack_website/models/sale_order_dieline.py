@@ -27,33 +27,9 @@ class SaleOrderDieline(models.Model):
     # Artwork: JSON com {__logo__: {...}, __logo_back__: {...}}
     artwork_json = fields.Text(string='Artwork JSON', default='{}')
 
-    # SVGs vectoriais gerados no browser para frente e verso
+    # SVGs vectoriais gerados no browser (mantidos para compatibilidade, não usados em views)
     svg_front = fields.Text(string='SVG Frente')
     svg_back  = fields.Text(string='SVG Verso')
-
-    svg_front_html = fields.Html(
-        string='Pré-visualização Frente', compute='_compute_svg_html', sanitize=False)
-    svg_back_html  = fields.Html(
-        string='Pré-visualização Verso',  compute='_compute_svg_html', sanitize=False)
-
-    def _compute_svg_html(self):
-        for rec in self:
-            if rec.id and rec.svg_front:
-                rec.svg_front_html = (
-                    '<div style="text-align:center;padding:8px">'
-                    '<img src="/dieline/order/%d/svg/front" style="max-width:100%%;border:1px solid #ddd"/>'
-                    '</div>' % rec.id
-                )
-            else:
-                rec.svg_front_html = '<p class="text-muted">Sem SVG</p>'
-            if rec.id and rec.svg_back:
-                rec.svg_back_html = (
-                    '<div style="text-align:center;padding:8px">'
-                    '<img src="/dieline/order/%d/svg/back" style="max-width:100%%;border:1px solid #ddd"/>'
-                    '</div>' % rec.id
-                )
-            else:
-                rec.svg_back_html = '<p class="text-muted">Sem SVG</p>'
 
     def action_open_preview(self):
         self.ensure_one()
@@ -75,12 +51,20 @@ class SaleOrderDieline(models.Model):
             'target': 'new',
         }
 
+    def action_download_dieline_svg(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_url',
+            'url': '/dieline/order/svg/%d' % self.id,
+            'target': 'self',
+        }
+
     def action_download_svg_front(self):
         self.ensure_one()
         return {
             'type': 'ir.actions.act_url',
             'url': '/dieline/order/%d/svg/front' % self.id,
-            'target': 'new',
+            'target': 'self',
         }
 
     def action_download_svg_back(self):
@@ -88,7 +72,7 @@ class SaleOrderDieline(models.Model):
         return {
             'type': 'ir.actions.act_url',
             'url': '/dieline/order/%d/svg/back' % self.id,
-            'target': 'new',
+            'target': 'self',
         }
 
 

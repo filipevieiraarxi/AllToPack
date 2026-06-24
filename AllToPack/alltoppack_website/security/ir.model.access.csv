@@ -1,3 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_sale_order_dieline_user,sale.order.dieline.user,model_sale_order_dieline,base.group_user,1,1,1,1
 access_sale_order_dieline_public,sale.order.dieline.public,model_sale_order_dieline,base.group_public,1,0,1,0
+access_atp_partner_logo_user,atp.partner.logo.user,model_atp_partner_logo,base.group_user,1,1,1,1
+access_atp_partner_logo_public,atp.partner.logo.public,model_atp_partner_logo,base.group_public,1,0,1,0

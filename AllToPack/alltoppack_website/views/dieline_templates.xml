@@ -25,17 +25,17 @@
                             <div id="atp-2d-view" class="atp-dl-2dview" style="display:none">
                                 <img id="atp-2d-img" alt="Dieline 2D"/>
                             </div>
-                            <!-- 2D Logo compositor (hidden by default) -->
+                            <!-- 2D Logo compositor -->
                             <div id="atp-logo2d-view" class="atp-dl-logo2d-view" style="display:none">
                                 <div class="atp-logo2d-toolbar">
-                                    <button id="logo2d-side-front" class="atp-ctrl active" title="Exterior da caixa (face imprimível)">
-                                        <i class="fa fa-square-o me-1"/>Frente
-                                    </button>
                                     <button id="logo2d-side-back" class="atp-ctrl" title="Interior da caixa">
-                                        <i class="fa fa-square me-1"/>Verso
+                                        <i class="fa fa-square me-1"/>Exterior
+                                    </button>
+                                    <button id="logo2d-side-front" class="atp-ctrl active" title="Exterior (frente física da caixa)">
+                                        <i class="fa fa-square-o me-1"/>Interior
                                     </button>
                                     <span class="atp-ctrl-sep" style="margin:0 6px"/>
-                                    <button id="logo2d-zoom-in" class="atp-ctrl" title="Zoom +"><i class="fa fa-search-plus"/></button>
+                                    <button id="logo2d-zoom-in"  class="atp-ctrl" title="Zoom +"><i class="fa fa-search-plus"/></button>
                                     <button id="logo2d-zoom-out" class="atp-ctrl" title="Zoom −"><i class="fa fa-search-minus"/></button>
                                     <button id="logo2d-zoom-fit" class="atp-ctrl" title="Ajustar ao ecrã"><i class="fa fa-expand"/></button>
                                 </div>
@@ -43,7 +43,7 @@
                                     <canvas id="canvas2dlogo" class="atp-logo2d-canvas"/>
                                 </div>
                                 <span class="atp-dl-viewer-hint" id="logo2d-hint">
-                                    arrastar o logo para reposicionar · scroll para zoom
+                                    arrastar logo · scroll para zoom · clique para selecionar
                                 </span>
                             </div>
                             <!-- Hint flutuante -->
@@ -201,6 +201,15 @@
                                 </div>
                             </div>
 
+                            <!-- CARD: Logo Info (visível quando há logo seleccionado) -->
+                            <div class="atp-scard" id="atp-logo-info-card" style="display:none">
+                                <div class="atp-scard-header" style="cursor:default">
+                                    <i class="fa fa-crosshairs"/>
+                                    <span>Logo — Posição</span>
+                                </div>
+                                <div class="atp-scard-body" id="atp-logo-info-panel"/>
+                            </div>
+
                             <!-- CARD: Artwork -->
                             <div class="atp-scard" id="acc-upload">
                                 <button type="button" class="atp-scard-header" data-atp-toggle="1">
@@ -244,15 +253,25 @@
                                             <i class="fa fa-trash me-1"/>Remover logo
                                         </button>
                                     </div>
-                                    <label class="atp-scard-btn w-100 text-center mb-1" for="fileArtwork">
-                                        <i class="fa fa-folder-open me-1"/>Escolher imagem…
-                                    </label>
+                                    <div style="display:flex;gap:6px;margin-bottom:4px">
+                                        <label class="atp-scard-btn text-center" for="fileArtwork" style="flex:1;margin:0">
+                                            <i class="fa fa-folder-open me-1"/>Escolher…
+                                        </label>
+                                        <button id="atp-logo-gallery-btn" class="atp-scard-btn" style="flex:0 0 auto" title="Os meus logos">
+                                            <i class="fa fa-th-large"/>
+                                        </button>
+                                    </div>
                                     <input type="file" id="fileArtwork" accept="image/*" style="display:none"/>
                                     <span id="artworkName" class="atp-scard-info"/>
-                                    <button id="atp-artwork-save" class="atp-scard-btn w-100 mt-2">
-                                        <i class="fa fa-save me-1"/>Guardar Artwork
-                                    </button>
-                                    <span id="atp-artwork-save-msg" class="atp-scard-info atp-text-ok mt-1" style="display:none!important"/>
+
+                                    <!-- Galeria de logos do cliente -->
+                                    <div id="atp-logo-gallery" style="display:none;margin-top:8px">
+                                        <div style="font-size:11px;color:#64748b;margin-bottom:6px;font-weight:600">OS MEUS LOGOS</div>
+                                        <div id="atp-logo-gallery-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px"/>
+                                        <div id="atp-logo-gallery-empty" style="display:none;font-size:12px;color:#94a3b8;text-align:center;padding:12px 0">
+                                            Sem logos guardados
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -394,7 +413,8 @@
             <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
             <!-- Parser e geradores devem ser carregados antes do engine -->
             <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.3"/>
-            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=64"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=65"/>
+            <script src="/alltoppack_website/static/src/js/dieline_logo2d.js?v=1"/>
 
             <script>
                 (function () {
@@ -407,6 +427,21 @@
                         syncQty();
                         var src = document.getElementById('acc-qty-input');
                         if (src) src.addEventListener('input', syncQty);
+
+                        /* Mostrar card de info do logo apenas na vista Logo 2D */
+                        (function () {
+                            var logoCard = document.getElementById('atp-logo-info-card');
+                            function onViewChange() {
+                                if (!logoCard) return;
+                                var active = document.querySelector('.atp-ctrl.active[id^="ctrl-"]');
+                                var isLogoView = active &amp;&amp; active.id === 'ctrl-logo2d';
+                                logoCard.style.display = isLogoView ? '' : 'none';
+                            }
+                            ['ctrl-3d','ctrl-2d','ctrl-logo2d'].forEach(function (id) {
+                                var el = document.getElementById(id);
+                                if (el) el.addEventListener('click', function () { setTimeout(onViewChange, 0); });
+                            });
+                        })();
 
                         /* Card toggle */
                         document.querySelectorAll('[data-atp-toggle]').forEach(function (btn) {
@@ -475,6 +510,211 @@
                         var qtyForPrice = document.getElementById('acc-qty-input');
                         if (qtyForPrice) qtyForPrice.addEventListener('input', updateOrderPrice);
                         updateOrderPrice();
+
+                        /* ── Artwork / Logo upload ─────────────────────────────────── */
+                        (function () {
+                            var fileInput   = document.getElementById('fileArtwork');
+                            var preview     = document.getElementById('atp-artwork-preview');
+                            var nameEl      = document.getElementById('artworkName');
+                            var rotRow      = document.getElementById('atp-artwork-rot-row');
+                            var scaleRow    = document.getElementById('atp-artwork-scale-row');
+                            var dragHint    = document.getElementById('atp-artwork-drag-hint');
+                            var gotoBtn     = document.getElementById('atp-goto-logo2d');
+                            var removeBtn   = document.getElementById('atp-artwork-remove');
+                            var rotLabel    = document.getElementById('atp-artwork-rot-label');
+                            var scaleLabel  = document.getElementById('atp-artwork-scale-label');
+                            var rotCCW      = document.getElementById('atp-artwork-rot-ccw');
+                            var rotCW       = document.getElementById('atp-artwork-rot-cw');
+                            var scaleDown   = document.getElementById('atp-artwork-scale-down');
+                            var scaleUp     = document.getElementById('atp-artwork-scale-up');
+
+                            var rot  = 0;
+                            var sizeMM = 80;
+
+                            function showArtworkControls(show) {
+                                if (preview)    preview.style.display    = show ? '' : 'none';
+                                if (rotRow)     rotRow.style.display     = show ? '' : 'none';
+                                if (scaleRow)   scaleRow.style.display   = show ? '' : 'none';
+                                if (dragHint)   dragHint.style.display   = show ? '' : 'none';
+                                if (gotoBtn)    gotoBtn.style.display    = show ? '' : 'none';
+                                if (removeBtn)  removeBtn.style.display  = show ? '' : 'none';
+                            }
+
+                            if (fileInput) {
+                                fileInput.addEventListener('change', function () {
+                                    var file = fileInput.files[0];
+                                    if (!file) return;
+                                    var reader = new FileReader();
+                                    reader.onload = function (ev) {
+                                        var dataUrl = ev.target.result;
+                                        window._atpArtworkDataUrl = dataUrl;
+                                        if (preview) { preview.src = dataUrl; }
+                                        if (nameEl)  nameEl.textContent = file.name;
+                                        rot = 0;
+                                        if (rotLabel) rotLabel.textContent = '0°';
+                                        if (scaleLabel) scaleLabel.textContent = sizeMM + 'mm';
+                                        showArtworkControls(true);
+                                        /* Guardar automaticamente na galeria do cliente */
+                                        fetch('/dieline/logo/upload', {
+                                            method: 'POST',
+                                            headers: {'Content-Type': 'application/json'},
+                                            body: JSON.stringify({jsonrpc:'2.0',method:'call',params:{
+                                                name: file.name,
+                                                data_url: dataUrl
+                                            }})
+                                        }).then(function(r){return r.json();}).then(function(d){
+                                            if (d.result &amp;&amp; d.result.ok) {
+                                                window._atpGalleryLoaded = false;
+                                            }
+                                        });
+                                    };
+                                    reader.readAsDataURL(file);
+                                });
+                            }
+
+                            if (rotCCW) rotCCW.addEventListener('click', function () {
+                                rot = (rot - 90 + 360) % 360;
+                                if (rotLabel) rotLabel.textContent = rot + '°';
+                                if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.rotateLogo) window.ATP_LOGO2D.rotateLogo(-90);
+                            });
+                            if (rotCW) rotCW.addEventListener('click', function () {
+                                rot = (rot + 90) % 360;
+                                if (rotLabel) rotLabel.textContent = rot + '°';
+                                if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.rotateLogo) window.ATP_LOGO2D.rotateLogo(90);
+                            });
+                            if (scaleDown) scaleDown.addEventListener('click', function () {
+                                sizeMM = Math.max(10, sizeMM - 10);
+                                if (scaleLabel) scaleLabel.textContent = sizeMM + 'mm';
+                            });
+                            if (scaleUp) scaleUp.addEventListener('click', function () {
+                                sizeMM = Math.min(500, sizeMM + 10);
+                                if (scaleLabel) scaleLabel.textContent = sizeMM + 'mm';
+                            });
+                            if (removeBtn) removeBtn.addEventListener('click', function () {
+                                /* Se houver logo seleccionado no canvas 2D, removê-lo */
+                                if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.removeSelected) {
+                                    window.ATP_LOGO2D.removeSelected();
+                                }
+                                window._atpArtworkDataUrl = null;
+                                if (fileInput) fileInput.value = '';
+                                if (preview) preview.src = '';
+                                if (nameEl) nameEl.textContent = '';
+                                showArtworkControls(false);
+                            });
+
+                            /* Botão "Posicionar no Dieline" — muda para vista Logo2D e coloca a imagem */
+                            if (gotoBtn) {
+                                gotoBtn.addEventListener('click', function () {
+                                    var btnLogo = document.getElementById('ctrl-logo2d');
+                                    if (btnLogo) btnLogo.click();
+                                    setTimeout(function () {
+                                        if (window.ATP_LOGO2D &amp;&amp; window._atpArtworkDataUrl) {
+                                            window.ATP_LOGO2D.placeImage(window._atpArtworkDataUrl, rot);
+                                        }
+                                    }, 50);
+                                });
+                            }
+
+                            /* ── Galeria de logos do cliente ──────────────────── */
+                            (function () {
+                                var galleryBtn  = document.getElementById('atp-logo-gallery-btn');
+                                var galleryDiv  = document.getElementById('atp-logo-gallery');
+                                var galleryGrid = document.getElementById('atp-logo-gallery-grid');
+                                var galleryEmpty = document.getElementById('atp-logo-gallery-empty');
+                                if (!galleryBtn || !galleryDiv) return;
+
+                                var galleryOpen = false;
+                                window._atpGalleryLoaded = window._atpGalleryLoaded || false;
+
+                                function loadGallery() {
+                                    fetch('/web/dataset/call_kw', {
+                                        method: 'POST',
+                                        headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify({
+                                            jsonrpc: '2.0', method: 'call', id: 1,
+                                            params: {
+                                                model: 'atp.partner.logo',
+                                                method: 'search_read',
+                                                args: [[['partner_id', '=', 'current']]],
+                                                kwargs: {fields: ['id','name','image','mimetype'], limit: 50}
+                                            }
+                                        })
+                                    })
+                                    .catch(function() { return null; })
+                                    .then(function(r) { return r ? r.json() : null; })
+                                    .then(function(data) {
+                                        if (!data || !data.result) return;
+                                        renderGallery(data.result);
+                                    });
+                                }
+
+                                function rpcLogoList() {
+                                    return fetch('/dieline/logo/list', {
+                                        method: 'POST',
+                                        headers: {'Content-Type': 'application/json'},
+                                        body: JSON.stringify({jsonrpc:'2.0',method:'call',params:{}})
+                                    }).then(function(r){return r.json();}).then(function(d){return d.result||[];});
+                                }
+
+                                function renderGallery(items) {
+                                    if (!galleryGrid) return;
+                                    galleryGrid.innerHTML = '';
+                                    if (!items.length) {
+                                        if (galleryEmpty) galleryEmpty.style.display = '';
+                                        return;
+                                    }
+                                    if (galleryEmpty) galleryEmpty.style.display = 'none';
+                                    items.forEach(function(item) {
+                                        var wrap = document.createElement('div');
+                                        wrap.style.cssText = 'position:relative;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;cursor:pointer;background:#f8fafc';
+                                        var img = document.createElement('img');
+                                        img.src = item.dataUrl || '';
+                                        img.alt = item.name;
+                                        img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:contain;padding:4px';
+                                        var del = document.createElement('button');
+                                        del.innerHTML = '&#10005;';
+                                        del.title = 'Remover';
+                                        del.style.cssText = 'position:absolute;top:2px;right:2px;background:rgba(239,68,68,0.85);color:#fff;border:none;border-radius:3px;width:16px;height:16px;font-size:9px;line-height:1;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center';
+                                        del.addEventListener('click', function(e) {
+                                            e.stopPropagation();
+                                            fetch('/dieline/logo/delete', {
+                                                method: 'POST',
+                                                headers: {'Content-Type': 'application/json'},
+                                                body: JSON.stringify({jsonrpc:'2.0',method:'call',params:{logo_id:item.id}})
+                                            }).then(function() {
+                                                wrap.remove();
+                                                if (!galleryGrid.children.length &amp;&amp; galleryEmpty) galleryEmpty.style.display = '';
+                                            });
+                                        });
+                                        img.addEventListener('click', function() {
+                                            window._atpArtworkDataUrl = item.dataUrl;
+                                            if (preview) { preview.src = item.dataUrl; }
+                                            if (nameEl)  nameEl.textContent = item.name;
+                                            rot = 0;
+                                            if (rotLabel) rotLabel.textContent = '0°';
+                                            showArtworkControls(true);
+                                            galleryDiv.style.display = 'none';
+                                            galleryOpen = false;
+                                            galleryBtn.classList.remove('active');
+                                        });
+                                        wrap.appendChild(img);
+                                        wrap.appendChild(del);
+                                        galleryGrid.appendChild(wrap);
+                                    });
+                                }
+
+                                galleryBtn.addEventListener('click', function() {
+                                    galleryOpen = !galleryOpen;
+                                    galleryDiv.style.display = galleryOpen ? '' : 'none';
+                                    galleryBtn.classList.toggle('active', galleryOpen);
+                                    if (galleryOpen &amp;&amp; !window._atpGalleryLoaded) {
+                                        window._atpGalleryLoaded = true;
+                                        rpcLogoList().then(renderGallery);
+                                    }
+                                });
+
+                            })();
+                        })();
                     });
                 })();
             </script>
