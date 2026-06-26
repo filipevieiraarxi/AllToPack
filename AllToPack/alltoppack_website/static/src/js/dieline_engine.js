@@ -35,6 +35,10 @@
 
     /* árvore de dobras montada: lista de { node, pivot, foldSign, axis } */
     var folds = [];
+    /* Para caixas de 2 peças (FEFCO_0330): grupo THREE.js separado para a tampa,
+       com translação Y animada para simular o encaixe. */
+    var lidGroup = null;
+    var lidAnimData = null; /* { startY, endY, tStart, tEnd } */
     var svgTextCache = null;
     var meshMap = {};
     var _currentGeo = null;
@@ -145,17 +149,17 @@
                 maxH = Math.max(maxH, mm(panelDepth(n.points, n.edge)));
             }
         });
-        sceneSize = Math.max(baseL, baseW, maxH, 50);
-
         /* flatSize = bounding box de todos os nodes no plano planificado.
-           Usado para o zoom inicial mostrar a dieline completa. */
+           Usado para o zoom inicial mostrar a dieline completa.
+           Para caixas de 2 peças (0330) cobre base + lid lado a lado. */
         var fxMin=Infinity,fxMax=-Infinity,fyMin=Infinity,fyMax=-Infinity;
         geo.nodes.forEach(function(n){ n.points.forEach(function(p){
             var sx=mm(p.x-off.x), sy=mm(p.y-off.y);
             if(sx<fxMin)fxMin=sx; if(sx>fxMax)fxMax=sx;
             if(sy<fyMin)fyMin=sy; if(sy>fyMax)fyMax=sy;
         }); });
-        flatSize = Math.max(fxMax-fxMin, fyMax-fyMin, sceneSize);
+        flatSize = Math.max(fxMax-fxMin, fyMax-fyMin, 50);
+        sceneSize = Math.max(baseL, baseW, maxH, 50);
 
         /* Levantar a caixa: rodar boxGroup -90° em X → base no plano XY, paredes em Z/Y.
            Após esta rotação: X=L, Y=W(profundidade), Z=H(altura visual).
@@ -166,6 +170,41 @@
 
         var groups = {};
         folds = [];
+        lidGroup = null;
+        lidAnimData = null;
+
+        /* Para caixas de 2 peças: detectar o node com _lidRoot=true */
+        var lidRootNode = null;
+        geo.nodes.forEach(function(n) { if (n._lidRoot) lidRootNode = n; });
+
+        /* Se existe lid, criar um grupo separado.
+           No estado plano (t=0) o lid fica ao lado da base no plano XZ.
+           Ao animar (t→1) sobe em Y para encaixar por cima da base montada.
+
+           Geometria:
+             - off = (minX, minY) do root da base
+             - lid SVG está numa região diferente (X mais à esquerda no SVG)
+             - sceneOf(lidCenter) dá a posição do lid em coords de cena relativas à base
+
+           Para que no estado montado o lid fique centrado SOBRE a base:
+             lidGroup.position.x = -(lidL/2) centrado em X
+             lidGroup.position.z = maxH/2 (mesmo Z que a base)
+             lidGroup.position.y = mountY (anima de baseY para mountY)
+
+           Para isso, o lidGroup usa o mesmo off/sceneOf da base, e os painéis
+           do lid são desenhados nas suas coords SVG relativas — ficam ao lado
+           horizontalmente. Ao montar, o lidGroup.position desloca-os para cima. */
+        if (lidRootNode) {
+            /* O lidGroup partilha exatamente a mesma rotation e position do boxGroup:
+               assim ambos vivem no mesmo espaço e o layout SVG é preservado —
+               os painéis do lid ficam à esquerda da base, tal como no SVG. */
+            lidGroup = new THREE.Group();
+            lidGroup.rotation.x = boxGroup.rotation.x;
+            lidGroup.position.copy(boxGroup.position);
+            boxPivot.add(lidGroup);
+
+            lidAnimData = null;  /* sem translação animada por agora */
+        }
 
         /* Calcular profundidade de cada node na árvore (root=0, filhos=1, netos=2…).
            Usado para escalonar a animação por fases. */
@@ -204,15 +243,19 @@
             /* Os filhos penduram no FOLDGROUP do pai (para acompanharem a
                dobra do pai). groups[key] = { attach, restWorld }. */
             var parent = node.parentKey ? groups[node.parentKey] : null;
-            var parentAttach = parent ? parent.attach : boxGroup;
+
+            /* Root do lid usa lidGroup como attach; root da base usa boxGroup. */
+            var isLidRoot = (node._lidRoot && node.parentKey == null);
+            var parentAttach = parent ? parent.attach : (isLidRoot ? lidGroup : boxGroup);
 
             var color = node.angle >= 135 ? COL_LID : COL_WALL;
 
             if (node.parentKey == null) {
+                var attachGroup = isLidRoot ? lidGroup : boxGroup;
                 var mesh = polyMesh(node.points, off, mm, color, node.key, node.stackOrder || 0);
                 mesh.rotation.x = Math.PI / 2;
-                boxGroup.add(mesh);
-                groups[node.key] = { attach: boxGroup, restWorld: new THREE.Matrix4() };
+                attachGroup.add(mesh);
+                groups[node.key] = { attach: attachGroup, restWorld: new THREE.Matrix4() };
                 /* Root: SVG→local = só escala mm e offset. û=SVG-X, n̂=SVG-Y → ângulo=0. */
                 node._svgToLocal = (function(captOff, captMm) {
                     return function(p) {
@@ -239,6 +282,7 @@
         });
 
         calcFoldWindows();
+
         updateFolds(animT);
         buildAxes();
         updateInfo(geo);
@@ -324,7 +368,7 @@
             ctx.fillStyle = '#000'; ctx.font = 'bold 160px sans-serif'; ctx.textAlign = 'center';
             ctx.fillText(node.key.replace('panel_','p'), 128, 190);
             var lbl = new THREE.Mesh(
-                new THREE.PlaneGeometry(30, 30),
+                new THREE.PlaneGeometry(60, 60),
                 new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true, side: THREE.DoubleSide })
             );
             var cx = 0, cy = 0;
@@ -367,6 +411,9 @@
         node._localAngle = localAngle;
         node._localPts = pts2d.map(function(v) { return { x: v.x, y: v.y }; });
         node._texYInvert = false; /* filhos: referencial correcto, sem inversão UV-v */
+        /* _dvInverted é definido pelo TemplateMapper no parser para casos específicos
+           onde nHat aponta para SVG-cima, causando inversão UV-v vs canvas-Y. */
+        if (node._dvInverted === undefined) node._dvInverted = false;
 
         /* animGroup vem do TemplateMapper — não há heurísticas aqui. */
         folds.push({
@@ -604,15 +651,10 @@
         groups.forEach(function (g, idx) { rankOf[g] = idx; });
         var numRanks = groups.length;
 
-        var step = numRanks > 1 ? 1 / (numRanks - 1 + (OVERLAP_GROW - 1)) : 1;
-        var winW = step * OVERLAP_GROW;
-
         for (var j = 0; j < folds.length; j++) {
             var rank = rankOf[folds[j].animGroup || 0];
-            var tS = rank * step;
-            var tE = tS + winW;
-            if (tE > 1) tE = 1;
-            if (numRanks === 1) { tS = 0; tE = 1; }
+            var tS = numRanks > 1 ? rank / numRanks : 0;
+            var tE = numRanks > 1 ? (rank + 1) / numRanks : 1;
             folds[j].tStart = tS;
             folds[j].tEnd   = tE;
         }
@@ -629,11 +671,23 @@
             var k = ease(tLocal);
             f.pivot.rotation.x = k * deg2rad(f.angle) * f.sign;
         }
+        /* Animar translação XYZ do lid: do estado plano para encaixe por cima */
+        if (lidGroup && lidAnimData) {
+            var la = lidAnimData;
+            var tLid = la.tEnd > la.tStart ? (t - la.tStart) / (la.tEnd - la.tStart) : t;
+            tLid = Math.max(0, Math.min(1, tLid));
+            var kLid = ease(tLid);
+            lidGroup.position.x = la.flatX + kLid * (la.mountX - la.flatX);
+            lidGroup.position.y = la.flatY + kLid * (la.mountY - la.flatY);
+            lidGroup.position.z = la.flatZ + kLid * (la.mountZ - la.flatZ);
+        }
     }
 
     function clearScene() {
         if (boxPivot) { scene.remove(boxPivot); boxPivot = null; }
         boxGroup = null;
+        lidGroup = null;
+        lidAnimData = null;
         folds = [];
         meshMap = {};
     }

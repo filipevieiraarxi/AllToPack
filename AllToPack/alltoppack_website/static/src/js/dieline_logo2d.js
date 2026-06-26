@@ -122,25 +122,33 @@
         applyAllTextures();
     }
 
-    /* Ajustar viewport ao SVG */
+    /* Ajustar viewport ao SVG — replica object-fit:contain com padding 24px,
+       igual à vista 2D estática para que zoom e posição sejam idênticos. */
     function fitView() {
-        if (!geo || !geo.nodes || !geo.nodes.length) return;
-        /* bbox de todos os pontos dos painéis em px SVG */
-        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        geo.nodes.forEach(function (n) {
-            n.points.forEach(function (p) {
-                if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-                if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+        if (!canvas.width || !canvas.height) return;
+        var svgW, svgH;
+        if (svgImg && svgImg.naturalWidth && svgImg.naturalHeight) {
+            svgW = svgImg.naturalWidth;
+            svgH = svgImg.naturalHeight;
+        } else if (geo && geo.nodes && geo.nodes.length) {
+            /* fallback: bbox dos nodes antes do SVG carregar */
+            var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            geo.nodes.forEach(function (n) {
+                n.points.forEach(function (p) {
+                    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+                    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+                });
             });
-        });
-        var svgW = maxX - minX, svgH = maxY - minY;
+            svgW = maxX - minX; svgH = maxY - minY;
+        } else { return; }
         if (svgW <= 0 || svgH <= 0) return;
-        var margin = 40;
-        var scaleX = (canvas.width  - margin * 2) / svgW;
-        var scaleY = (canvas.height - margin * 2) / svgH;
-        vp.scale = Math.min(scaleX, scaleY, 4);
-        vp.ox = (canvas.width  - svgW * vp.scale) / 2 - minX * vp.scale;
-        vp.oy = (canvas.height - svgH * vp.scale) / 2 - minY * vp.scale;
+        var pad = 24; /* igual ao padding da .atp-dl-2dview */
+        var scaleX = (canvas.width  - pad * 2) / svgW;
+        var scaleY = (canvas.height - pad * 2) / svgH;
+        vp.scale = Math.min(scaleX, scaleY);
+        /* centrar igual ao object-fit:contain */
+        vp.ox = (canvas.width  - svgW * vp.scale) / 2;
+        vp.oy = (canvas.height - svgH * vp.scale) / 2;
     }
 
     /* ── Transformações viewport ──────────────────────────────────── */
@@ -242,11 +250,6 @@
             ctx.drawImage(svgImg, 0, 0);
         } else {
             drawPanelsFallback();
-        }
-
-        /* Highlight do painel hover/seleccionado */
-        if (selected) {
-            drawPanelHighlight(selected.panelKey, 'rgba(13,148,136,0.18)', '#0d9488', 2);
         }
 
         /* Logos da face activa */
@@ -370,41 +373,112 @@
         return result;
     }
 
-    function drawDimensions(lg) {
+    /* Tight bounding box axis-aligned (SVG-px) do logo rotacionado */
+    function logoBboxSvg(lg) {
         var ctr = localToSvgPx(lg);
-        if (!ctr) return;
-        var cCtr = svgToCanvas(ctr.x, ctr.y);
-
-        var panels = panelsForLogo(lg);
-        panels.forEach(function (node) {
-            if (!node._localPts) return;
-
-            /* Coords locais do centro do logo neste painel */
-            var loc = node._svgToLocal ? node._svgToLocal({ x: ctr.x, y: ctr.y }) : { s: lg.s, d: lg.d };
-            var ls = loc.s, ld = loc.d;
-
-            var pts = node._localPts;
-            var minS = Infinity, maxS = -Infinity, minD = Infinity, maxD = -Infinity;
-            pts.forEach(function (p) {
-                if (p.x < minS) minS = p.x; if (p.x > maxS) maxS = p.x;
-                if (p.y < minD) minD = p.y; if (p.y > maxD) maxD = p.y;
-            });
-
-            function edgePt(s, d) {
-                var p = node._localToSvg(s, d);
-                return svgToCanvas(p.x, p.y);
-            }
-
-            var dLeft   = ls - minS;
-            var dRight  = maxS - ls;
-            var dTop    = ld - minD;
-            var dBottom = maxD - ld;
-
-            drawDimLine(ctx, cCtr, edgePt(minS, ld),  dLeft   < 0 ? 0 : dLeft,   'mm', 'left');
-            drawDimLine(ctx, cCtr, edgePt(maxS, ld),  dRight  < 0 ? 0 : dRight,  'mm', 'right');
-            drawDimLine(ctx, cCtr, edgePt(ls,  minD), dTop    < 0 ? 0 : dTop,    'mm', 'top');
-            drawDimLine(ctx, cCtr, edgePt(ls,  maxD), dBottom < 0 ? 0 : dBottom, 'mm', 'bottom');
+        if (!ctr || !lg.img) return null;
+        var halfW = mmToPx(lg.sizeMM) / 2;
+        var aspect = lg.img.naturalHeight / (lg.img.naturalWidth || 1);
+        var halfH = halfW * aspect;
+        var rad = lg.rot * Math.PI / 180;
+        var cos = Math.cos(rad), sin = Math.sin(rad);
+        var corners = [
+            { x:  halfW, y:  halfH }, { x: -halfW, y:  halfH },
+            { x: -halfW, y: -halfH }, { x:  halfW, y: -halfH },
+        ].map(function (c) {
+            return { x: ctr.x + c.x * cos - c.y * sin,
+                     y: ctr.y + c.x * sin + c.y * cos };
         });
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        corners.forEach(function (c) {
+            if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x;
+            if (c.y < minY) minY = c.y; if (c.y > maxY) maxY = c.y;
+        });
+        return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+    }
+
+    /* Bbox global (SVG-px) de todos os painéis da caixa */
+    function globalDielineBbox() {
+        if (!geo) return null;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        geo.nodes.forEach(function (n) {
+            n.points.forEach(function (p) {
+                if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+                if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+            });
+        });
+        return (minX === Infinity) ? null : { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+    }
+
+    /* Bbox (SVG-px) apenas do painel indicado */
+    function panelBboxSvg(panelKey) {
+        if (!geo) return null;
+        var node = geo.nodes.filter(function (n) { return n.key === panelKey; })[0];
+        if (!node || !node.points || !node.points.length) return null;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        node.points.forEach(function (p) {
+            if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+        });
+        return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+    }
+
+    /* Calcula os 4 extremos direcionais para as cotas do logo.
+       Para cada direção, considera apenas painéis cuja banda perpendicular
+       ao eixo se sobrepõe ao bbox do logo — assim cotas horizontais só
+       alcançam painéis que estão na mesma faixa vertical, e vice-versa.
+       A sobreposição exige pelo menos 1px para evitar painéis adjacentes a tocar. */
+    function cotaExtremes(logoBbox) {
+        if (!geo) return null;
+        var EPS = 1; /* px mínimo de sobreposição */
+        var extMinX = logoBbox.minX, extMaxX = logoBbox.maxX;
+        var extMinY = logoBbox.minY, extMaxY = logoBbox.maxY;
+
+        geo.nodes.forEach(function (n) {
+            var pMinX = Infinity, pMinY = Infinity, pMaxX = -Infinity, pMaxY = -Infinity;
+            n.points.forEach(function (p) {
+                if (p.x < pMinX) pMinX = p.x; if (p.x > pMaxX) pMaxX = p.x;
+                if (p.y < pMinY) pMinY = p.y; if (p.y > pMaxY) pMaxY = p.y;
+            });
+            /* Sobreposição vertical (para cotas esq/dir) */
+            var overlapV = Math.min(pMaxY, logoBbox.maxY) - Math.max(pMinY, logoBbox.minY) > EPS;
+            /* Sobreposição horizontal (para cotas cima/baixo) */
+            var overlapH = Math.min(pMaxX, logoBbox.maxX) - Math.max(pMinX, logoBbox.minX) > EPS;
+
+            if (overlapV) {
+                if (pMinX < extMinX) extMinX = pMinX;
+                if (pMaxX > extMaxX) extMaxX = pMaxX;
+            }
+            if (overlapH) {
+                if (pMinY < extMinY) extMinY = pMinY;
+                if (pMaxY > extMaxY) extMaxY = pMaxY;
+            }
+        });
+        return { minX: extMinX, minY: extMinY, maxX: extMaxX, maxY: extMaxY };
+    }
+
+    function drawDimensions(lg) {
+        var bbox   = logoBboxSvg(lg);
+        if (!bbox) return;
+        var ext = cotaExtremes(bbox);
+        if (!ext) return;
+
+        var u = geo ? (geo.unit || 1) : 1;
+        var dLeft   = Math.max(0, (bbox.minX - ext.minX) / u);
+        var dRight  = Math.max(0, (ext.maxX - bbox.maxX) / u);
+        var dTop    = Math.max(0, (bbox.minY - ext.minY) / u);
+        var dBottom = Math.max(0, (ext.maxY - bbox.maxY) / u);
+
+        var midY = (bbox.minY + bbox.maxY) / 2;
+        var midX = (bbox.minX + bbox.maxX) / 2;
+
+        function cp(sx, sy) { return svgToCanvas(sx, sy); }
+
+        /* seta aponta para o logo (from = extremo direcional, to = borde bbox logo) */
+        drawDimLine(ctx, cp(ext.minX, midY), cp(bbox.minX, midY), dLeft,   'mm', 'left');
+        drawDimLine(ctx, cp(ext.maxX, midY), cp(bbox.maxX, midY), dRight,  'mm', 'right');
+        drawDimLine(ctx, cp(midX, ext.minY), cp(midX, bbox.minY), dTop,    'mm', 'top');
+        drawDimLine(ctx, cp(midX, ext.maxY), cp(midX, bbox.maxY), dBottom, 'mm', 'bottom');
     }
 
     function drawDimLine(ctx2, from, to, valueMm, unit, side) {
@@ -640,6 +714,53 @@
         };
     }
 
+    /* Remove margens transparentes ou de fundo sólido à volta do logo.
+       PNG/SVG: corta pixels com alpha ≤ 10.
+       JPEG/opaco: detecta cor dos 4 cantos como fundo, tolerância dist² < 400. */
+    function trimImage(img, callback) {
+        var tw = img.naturalWidth  || img.width;
+        var th = img.naturalHeight || img.height;
+        if (!tw || !th) { callback(img); return; }
+        var tc = document.createElement('canvas');
+        tc.width = tw; tc.height = th;
+        var tc2 = tc.getContext('2d');
+        tc2.drawImage(img, 0, 0);
+        var data = tc2.getImageData(0, 0, tw, th).data;
+        var hasAlpha = false;
+        for (var i = 3; i < data.length; i += 4) {
+            if (data[i] < 250) { hasAlpha = true; break; }
+        }
+        function cval(x, y, ch) { return data[(y * tw + x) * 4 + ch]; }
+        var bgR = (cval(0,0,0) + cval(tw-1,0,0) + cval(0,th-1,0) + cval(tw-1,th-1,0)) / 4;
+        var bgG = (cval(0,0,1) + cval(tw-1,0,1) + cval(0,th-1,1) + cval(tw-1,th-1,1)) / 4;
+        var bgB = (cval(0,0,2) + cval(tw-1,0,2) + cval(0,th-1,2) + cval(tw-1,th-1,2)) / 4;
+        function isBg(idx) {
+            if (hasAlpha) return data[idx + 3] <= 10;
+            var dr = data[idx]-bgR, dg = data[idx+1]-bgG, db = data[idx+2]-bgB;
+            return data[idx+3] > 200 && (dr*dr + dg*dg + db*db) < 400;
+        }
+        var minX = tw, minY = th, maxX = 0, maxY = 0, found = false;
+        for (var y = 0; y < th; y++) {
+            for (var x = 0; x < tw; x++) {
+                if (!isBg((y * tw + x) * 4)) {
+                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                    found = true;
+                }
+            }
+        }
+        if (!found || (minX === 0 && minY === 0 && maxX === tw-1 && maxY === th-1)) {
+            callback(img); return;
+        }
+        var cw = maxX - minX + 1, ch = maxY - minY + 1;
+        var out = document.createElement('canvas');
+        out.width = cw; out.height = ch;
+        out.getContext('2d').drawImage(tc, minX, minY, cw, ch, 0, 0, cw, ch);
+        var trimmed = new Image();
+        trimmed.onload = function () { callback(trimmed); };
+        trimmed.src = out.toDataURL('image/png');
+    }
+
     /* Coloca o logo carregado centrado num node específico.
        Se já existe um logo na face activa, substitui-o (um logo por face). */
     function placePanelCenter(node) {
@@ -648,16 +769,18 @@
         var rot = rotEl ? parseInt(rotEl.textContent, 10) || 0 : 0;
         var img = new Image();
         img.onload = function () {
-            var lg = logoDefaultForNode(node, img, rot, window._atpArtworkDataUrl);
-            if (!lg) return;
-            /* Remover logos anteriores desta face do 3D e do array */
-            logos[activeSide].forEach(function (old) { clearLogoTexture(old); });
-            logos[activeSide] = [];
-            logos[activeSide].push(lg);
-            selected = lg;
-            updateLogoInfoPanel();
-            applyLogoTexture(lg);
-            draw();
+            trimImage(img, function (trimmed) {
+                var lg = logoDefaultForNode(node, trimmed, rot, window._atpArtworkDataUrl);
+                if (!lg) return;
+                /* Remover logos anteriores desta face do 3D e do array */
+                logos[activeSide].forEach(function (old) { clearLogoTexture(old); });
+                logos[activeSide] = [];
+                logos[activeSide].push(lg);
+                selected = lg;
+                updateLogoInfoPanel();
+                applyLogoTexture(lg);
+                draw();
+            });
         };
         img.src = window._atpArtworkDataUrl;
     }
@@ -669,14 +792,16 @@
 
         var img = new Image();
         img.onload = function () {
-            var rootNode = geo.nodes[0];
-            var lg = logoDefaultForNode(rootNode, img, initialRot, dataUrl);
-            if (!lg) return;
-            logos[activeSide].push(lg);
-            selected = lg;
-            updateLogoInfoPanel();
-            applyLogoTexture(lg);
-            draw();
+            trimImage(img, function (trimmed) {
+                var rootNode = geo.nodes[0];
+                var lg = logoDefaultForNode(rootNode, trimmed, initialRot, dataUrl);
+                if (!lg) return;
+                logos[activeSide].push(lg);
+                selected = lg;
+                updateLogoInfoPanel();
+                applyLogoTexture(lg);
+                draw();
+            });
         };
         img.src = dataUrl;
     }
@@ -720,29 +845,17 @@
         }
         if (card) card.style.display = '';
         var node = geo.nodes.filter(function (n) { return n.key === selected.panelKey; })[0];
-        if (!node || !node._localPts) { if (card) card.style.display = 'none'; return; }
+        if (!node) { if (card) card.style.display = 'none'; return; }
 
-        var pts = node._localPts;
-        var minS = Infinity, maxS = -Infinity, minD = Infinity, maxD = -Infinity;
-        pts.forEach(function (p) {
-            if (p.x < minS) minS = p.x; if (p.x > maxS) maxS = p.x;
-            if (p.y < minD) minD = p.y; if (p.y > maxD) maxD = p.y;
-        });
-        var dLeft   = Math.max(0, selected.s - minS);
-        var dRight  = Math.max(0, maxS - selected.s);
-        var dTop    = Math.max(0, selected.d - minD);
-        var dBottom = Math.max(0, maxD - selected.d);
+        var bbox   = logoBboxSvg(selected);
+        var ext    = bbox ? cotaExtremes(bbox) : null;
+        var u = geo ? (geo.unit || 1) : 1;
+        var dLeft   = (bbox && ext) ? Math.max(0, (bbox.minX - ext.minX) / u) : 0;
+        var dRight  = (bbox && ext) ? Math.max(0, (ext.maxX - bbox.maxX) / u) : 0;
+        var dTop    = (bbox && ext) ? Math.max(0, (bbox.minY - ext.minY) / u) : 0;
+        var dBottom = (bbox && ext) ? Math.max(0, (ext.maxY - bbox.maxY) / u) : 0;
 
-        var faceLabel = activeSide === 'front' ? 'Exterior' : 'Interior';
         panel.innerHTML =
-            '<div class="atp-logo-info-row"><span class="atp-logo-info-label">Painel</span>' +
-            '<span class="atp-logo-info-val">' + selected.panelKey + ' · ' + faceLabel + '</span></div>' +
-            '<div class="atp-logo-info-row"><span class="atp-logo-info-label">Tamanho</span>' +
-            '<span class="atp-logo-info-val">' + selected.sizeMM + ' mm</span>' +
-            '<div class="atp-logo-info-stepper">' +
-            '<button class="atp-logo-size-btn" data-delta="-10">−</button>' +
-            '<button class="atp-logo-size-btn" data-delta="10">+</button>' +
-            '</div></div>' +
             '<div class="atp-logo-info-cotas">' +
             '<span title="Cima">↑ ' + Math.round(dTop) + ' mm</span>' +
             '<span title="Baixo">↓ ' + Math.round(dBottom) + ' mm</span>' +
@@ -750,18 +863,9 @@
             '<span title="Dir.">→ ' + Math.round(dRight) + ' mm</span>' +
             '</div>';
 
-        /* Botões de tamanho */
-        panel.querySelectorAll('.atp-logo-size-btn').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var delta = parseInt(btn.dataset.delta, 10);
-                if (selected) {
-                    selected.sizeMM = Math.max(5, selected.sizeMM + delta);
-                    updateLogoInfoPanel();
-                    applyLogoTexture(selected);
-                    draw();
-                }
-            });
-        });
+        /* Sincronizar scaleLabel externo com o tamanho do logo seleccionado */
+        var scaleLabel = document.getElementById('atp-artwork-scale-label');
+        if (scaleLabel) scaleLabel.textContent = selected.sizeMM + 'mm';
     }
 
     /* ── Texturas 3D ──────────────────────────────────────────────── */
@@ -819,17 +923,16 @@
                Não há inversão de eixo. */
             var logoX = (loc.s - minS) * PPM;
             var logoY = (loc.d - minD) * PPM;
-
-            /* O canvas de textura tem eixo X = û e eixo Y = n̂ (referencial local do painel).
-               O utilizador definiu lg.rot em relação ao eixo X do SVG (horizontal).
-               Para que a rotação seja sempre a mesma visualmente, convertemos:
-               rotação no canvas = lg.rot (SVG) - _localAngle (ângulo de û face ao SVG-X).
-               Isto é válido para qualquer painel, primário ou secundário — a rotação
-               fica sempre ancorada ao referencial do SVG, não ao referencial local do painel. */
-            var totalRot = (lg.rot * Math.PI / 180) - (node._localAngle || 0);
+            /* _dvInverted: nHat aponta SVG-cima → UV-v e canvas-Y ficam invertidos.
+               A imagem ficaria de cabeça para baixo — scale(1,-1) corrige a orientação
+               sem alterar a posição. */
+            var totalRot = node._dvInverted
+                ? -((lg.rot * Math.PI / 180) - (node._localAngle || 0))
+                : (lg.rot * Math.PI / 180) - (node._localAngle || 0);
 
             tc2.save();
             tc2.translate(logoX, logoY);
+            if (node._dvInverted) tc2.scale(1, -1);
             tc2.rotate(totalRot);
             tc2.drawImage(lg.img, -logoW / 2, -logoH / 2, logoW, logoH);
             tc2.restore();
@@ -926,6 +1029,14 @@
         targets.forEach(function (lg) { applyLogoTexture(lg); });
     }
 
+    function scaleSelected(deltaMM) {
+        if (!selected) return;
+        selected.sizeMM = Math.max(5, Math.min(500, selected.sizeMM + deltaMM));
+        updateLogoInfoPanel();
+        applyLogoTexture(selected);
+        draw();
+    }
+
     window.ATP_LOGO2D = {
         onGeoReady:      onGeoReady,
         placeImage:      placeImage,
@@ -934,6 +1045,7 @@
         redraw:          draw,
         resizeCanvas:    resizeCanvas,
         rotateLogo:      rotateLogo,
+        scaleSelected:   scaleSelected,
     };
 
     /* Boot imediato */

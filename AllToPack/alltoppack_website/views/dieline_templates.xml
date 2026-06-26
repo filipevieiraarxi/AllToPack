@@ -583,12 +583,10 @@
                                 if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.rotateLogo) window.ATP_LOGO2D.rotateLogo(90);
                             });
                             if (scaleDown) scaleDown.addEventListener('click', function () {
-                                sizeMM = Math.max(10, sizeMM - 10);
-                                if (scaleLabel) scaleLabel.textContent = sizeMM + 'mm';
+                                if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.scaleSelected) window.ATP_LOGO2D.scaleSelected(-10);
                             });
                             if (scaleUp) scaleUp.addEventListener('click', function () {
-                                sizeMM = Math.min(500, sizeMM + 10);
-                                if (scaleLabel) scaleLabel.textContent = sizeMM + 'mm';
+                                if (window.ATP_LOGO2D &amp;&amp; window.ATP_LOGO2D.scaleSelected) window.ATP_LOGO2D.scaleSelected(10);
                             });
                             if (removeBtn) removeBtn.addEventListener('click', function () {
                                 /* Se houver logo seleccionado no canvas 2D, removê-lo */
