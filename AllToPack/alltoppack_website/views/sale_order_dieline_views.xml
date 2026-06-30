@@ -21,11 +21,11 @@
                     </group>
                     <div class="d-flex gap-2 mb-3">
                         <button name="action_download_svg_front" type="object"
-                                string="Dieline SVG Frente" icon="fa-file-code-o"
+                                string="Dieline SVG Interior" icon="fa-file-code-o"
                                 class="btn btn-sm btn-success"
                                 invisible="not dieline_svg"/>
                         <button name="action_download_svg_back" type="object"
-                                string="Dieline SVG Verso" icon="fa-file-code-o"
+                                string="Dieline SVG Exterior" icon="fa-file-code-o"
                                 class="btn btn-sm btn-outline-success"
                                 invisible="not dieline_svg"/>
                     </div>
@@ -52,11 +52,11 @@
                             <field name="box_h" string="H (mm)" digits="[6,0]"/>
                             <field name="dieline_svg" column_invisible="1"/>
                             <button name="action_download_svg_front" type="object"
-                                    string="SVG Frente" icon="fa-file-code-o"
+                                    string="SVG Interior" icon="fa-file-code-o"
                                     class="btn-sm btn-success"
                                     invisible="not dieline_svg"/>
                             <button name="action_download_svg_back" type="object"
-                                    string="SVG Verso" icon="fa-file-code-o"
+                                    string="SVG Exterior" icon="fa-file-code-o"
                                     class="btn-sm btn-outline-success"
                                     invisible="not dieline_svg"/>
                         </list>

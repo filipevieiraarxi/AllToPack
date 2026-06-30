@@ -368,6 +368,9 @@
                             </button>
                             <input type="range" id="animSlider" min="0" max="100" value="0" class="atp-dl-slider" title="Posição da animação"/>
                             <span id="animPct" class="atp-dl-pct">0%</span>
+                            <button id="ctrl-insert" class="atp-ctrl" title="Inserir base no lid" style="display:none">
+                                <i class="fa fa-sign-in" id="ctrl-insert-icon"/>
+                            </button>
                         </div>
 
                         <div class="atp-ctrl-sep"/>
@@ -412,9 +415,9 @@
             <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"/>
             <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
             <!-- Parser e geradores devem ser carregados antes do engine -->
-            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.3"/>
-            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=65"/>
-            <script src="/alltoppack_website/static/src/js/dieline_logo2d.js?v=1"/>
+            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.5"/>
+            <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=105"/>
+            <script src="/alltoppack_website/static/src/js/dieline_logo2d.js?v=2"/>
 
             <script>
                 (function () {

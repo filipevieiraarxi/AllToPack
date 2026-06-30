@@ -15,8 +15,12 @@
     var _cfg = window.ATP_CONFIG || {};
 
     var animT = 0, animPlaying = false, animDir = 1, animRAF = null;
+    var insertT = 0, insertPlaying = false, insertDir = 1, insertRAF = null;
     var autoRotate = false, currentView = '3d';
 
+    /* ZOOM_MAX é dinâmico: recalculado a cada rebuild a partir do tamanho da
+       caixa (ver buildFromGeometry), para que o zoom-out acompanhe sempre
+       caixas grandes. O default cobre o arranque antes do 1º rebuild. */
     var ZOOM_MIN = 50, ZOOM_MAX = 8000, ZOOM_DEFAULT = 900;
 
     /* DOM */
@@ -27,7 +31,7 @@
     if (img2d && _cfg.dielineSvgUrl) img2d.src = _cfg.dielineSvgUrl;
 
     /* Three */
-    var scene, camera, renderer, boxPivot, boxGroup, axesHelper;
+    var scene, camera, renderer, boxPivot, boxGroup, baseSpin, axesHelper;
     var sph = { r: ZOOM_DEFAULT };
     var flatSize = ZOOM_DEFAULT;
     /* Rotação livre sem gimbal lock: quaternion acumulado no boxPivot (inicializado em initThree) */
@@ -39,6 +43,12 @@
        com translação Y animada para simular o encaixe. */
     var lidGroup = null;
     var lidAnimData = null; /* { startY, endY, tStart, tEnd } */
+    var insertData = null;  /* { baseY0, baseY1, lidY0, lidY1, maxH } — para animação insert */
+    /* Animação combinada: o play normal faz dobras (0→INSERT_START) e depois a
+       sequência de encaixe base+lid (INSERT_START→1). _insertActive evita repetir
+       o setup/teardown a cada frame. */
+    var INSERT_START = 0.6;
+    var _insertActive = false;
     var svgTextCache = null;
     var meshMap = {};
     var _currentGeo = null;
@@ -60,7 +70,7 @@
        existir; senão usa este default. Dá volume "sólido" às paredes: cada
        painel tem a face exterior e interior separadas por esta espessura, com
        a borda tapada. Atualizada por buildFromGeometry. */
-    var THICKNESS_DEFAULT = 2;
+    var THICKNESS_DEFAULT = 5;
     var matThickness = THICKNESS_DEFAULT;
 
     /* polygonOffset empurra ligeiramente cada polígono em profundidade,
@@ -81,8 +91,8 @@
     }
 
     function makeMat(color) {
-        return new THREE.MeshLambertMaterial(applyPolyOffset({
-            color: color, side: THREE.DoubleSide,
+        return new THREE.MeshStandardMaterial(applyPolyOffset({
+            color: color, side: THREE.DoubleSide, roughness: 0.85, metalness: 0,
         }));
     }
 
@@ -113,8 +123,10 @@
            boxGroup: filho do pivot, deslocado para que o centro geométrico
            da caixa coincida com a origem — assim a rotação é sobre si próprio. */
         boxPivot = new THREE.Group();
+        baseSpin = new THREE.Group();   /* roda a base 90° sobre o seu centro (origem) no insert */
         boxGroup = new THREE.Group();
-        boxPivot.add(boxGroup);
+        baseSpin.add(boxGroup);
+        boxPivot.add(baseSpin);
         scene.add(boxPivot);
 
         /* Rotação inicial: 90° em X para que a dieline planificada fique de frente
@@ -134,8 +146,16 @@
         var rootNode = geo.nodes[0];
         var rb = polyBBox(rootNode.points);
         var off = { x: rb.minX, y: rb.minY };
-        var baseL = mm(rb.w), baseW = mm(rb.h);
         var rootArea = polyArea(rootNode.points);
+
+        /* Centrar o p0 actual (parentKey==null = root da árvore de dobras).
+           Para 0201/0215 o root é uma parede offset — usar o seu centro
+           para o position sem afectar sceneOf nem a animação. */
+        var actualRoot = geo.nodes.filter(function(n){ return n.parentKey == null; })[0] || rootNode;
+        var ab = polyBBox(actualRoot.points);
+        var baseL = mm(ab.w), baseW = mm(ab.h);
+        var p0cx = mm((ab.minX + ab.maxX) / 2 - off.x);
+        var p0cy = mm((ab.minY + ab.maxY) / 2 - off.y);
 
         /* SVG (x,y) → cena (X=x, Y=0, Z=y): base no plano XZ (deitada).
            boxGroup é rodado -90° em X para levantar a caixa para a vertical. */
@@ -161,11 +181,19 @@
         flatSize = Math.max(fxMax-fxMin, fyMax-fyMin, 50);
         sceneSize = Math.max(baseL, baseW, maxH, 50);
 
+        /* Alcance de zoom dinâmico: o limite de afastamento acompanha o tamanho
+           da caixa, para que mesmo caixas muito grandes possam ser afastadas.
+           Base no flatSize (enquadramento) com folga generosa. */
+        ZOOM_MAX = Math.max(8000, flatSize * 12);
+
         /* Levantar a caixa: rodar boxGroup -90° em X → base no plano XY, paredes em Z/Y.
-           Após esta rotação: X=L, Y=W(profundidade), Z=H(altura visual).
-           Centro geométrico: (-L/2, -W/2, -H/2) antes da rotação → centrado na origem. */
+           Rx(-90°): local(x,y,z) → world(x+px, z+py, -y+pz) com pos=(px,py,pz).
+           Caixa montada: lz∈[0,maxH] → wy∈[py, py+maxH]; ly∈[0,baseW] → wz∈[pz-baseW,pz].
+           Para centrar em Y: py=-maxH/2. Para centrar em Z: pz=baseW/2.
+           Para centrar em X: px=-baseL/2.
+           Eixos (axesHelper) na origem local (0,0,0) = vértice inferior de p0. */
         boxGroup.rotation.x = -Math.PI / 2;
-        boxGroup.position.set(-baseL / 2, -baseW / 2, maxH / 2);
+        boxGroup.position.set(-p0cx, -p0cy, 0);
         sceneCenter = { x: 0, y: 0, z: 0 };
 
         var groups = {};
@@ -195,15 +223,60 @@
            do lid são desenhados nas suas coords SVG relativas — ficam ao lado
            horizontalmente. Ao montar, o lidGroup.position desloca-os para cima. */
         if (lidRootNode) {
-            /* O lidGroup partilha exatamente a mesma rotation e position do boxGroup:
-               assim ambos vivem no mesmo espaço e o layout SVG é preservado —
-               os painéis do lid ficam à esquerda da base, tal como no SVG. */
+            /* Calcular offset SVG do lid em relação à base para centrar em X/Z */
+            var lidRb = polyBBox(lidRootNode.points);
+            var lidOffX = mm((lidRb.minX + lidRb.maxX) / 2 - (rb.minX + rb.maxX) / 2);
+            var lidOffZ = mm((lidRb.minY + lidRb.maxY) / 2 - (rb.minY + rb.maxY) / 2);
+
             lidGroup = new THREE.Group();
             lidGroup.rotation.x = boxGroup.rotation.x;
-            lidGroup.position.copy(boxGroup.position);
             boxPivot.add(lidGroup);
 
-            lidAnimData = null;  /* sem translação animada por agora */
+            /* POSIÇÃO INICIAL INTOCADA: lid no seu sítio natural (lado a lado). */
+            lidGroup.position.copy(boxGroup.position);
+
+            lidAnimData = null;
+
+            /* Separação REAL entre as peças: média de TODOS os pontos de cada
+               grupo (não só dos roots — os roots têm centros coincidentes).
+               Isto capta a separação lado-a-lado verdadeira em coords SVG. */
+            var lidCx = 0, lidCy = 0, lidN = 0;
+            var baseCx = 0, baseCy = 0, baseN = 0;
+            geo.nodes.forEach(function(n) {
+                n.points.forEach(function(p) {
+                    if (n._isLid) { lidCx += p.x; lidCy += p.y; lidN++; }
+                    else          { baseCx += p.x; baseCy += p.y; baseN++; }
+                });
+            });
+            lidCx /= (lidN || 1); lidCy /= (lidN || 1);
+            baseCx /= (baseN || 1); baseCy /= (baseN || 1);
+            /* deslocamento em cena para o lid coincidir com a base */
+            var dxEncaix = mm(baseCx - lidCx);
+            var dzEncaix = mm(baseCy - lidCy);
+
+            console.log('[INSERT] lidOff(root)=', lidOffX, lidOffZ,
+                        ' dEncaix(pts)=', dxEncaix, dzEncaix);
+
+            var baseDepth = -maxH * 2;
+            insertData = {
+                /* FASE 1 — deslocamento da BASE para a sua posição (base→lid + offset Z) */
+                baseDx: -dxEncaix,
+                baseDz: -dzEncaix,
+                /* baseDepth é ajustado por medição mais abaixo (alinhar topo da
+                   base com o fundo da tampa fechada). Começa igual ao do lid. */
+                baseDepth: baseDepth,
+                /* FASE 2 — lid fecha SÓ em profundidade (mesmo eixo Z), sem mudar X. */
+                lidNatural: lidGroup.position.clone(),
+                lidEncaix:  new THREE.Vector3(
+                    lidGroup.position.x,
+                    lidGroup.position.y,
+                    lidGroup.position.z + baseDepth
+                ),
+            };
+
+            /* Botão insert desativado: a sequência de encaixe é parte do play. */
+            var btnInsert = document.getElementById('ctrl-insert');
+            if (btnInsert) btnInsert.style.display = 'none';
         }
 
         /* Calcular profundidade de cada node na árvore (root=0, filhos=1, netos=2…).
@@ -284,7 +357,156 @@
         calcFoldWindows();
 
         updateFolds(animT);
-        buildAxes();
+
+        /* ── INSERT (FEFCO_0330): preparar pivô de rotação da base ──
+           Para a base rodar 90° SOBRE SI MESMA (sem orbitar) ao clicar no
+           botão, o baseSpin tem de estar no CENTRO da base. Medimos o centro
+           dos meshes da base (montados) em world e ajustamos baseSpin +
+           boxGroup de forma a que a geometria fique exatamente no mesmo sítio. */
+        if (baseSpin && boxGroup && insertData) {
+            updateFolds(1);                 /* medir com a caixa montada */
+            scene.updateMatrixWorld(true);
+            var baseBox = new THREE.Box3();
+            boxGroup.traverse(function(o){ if (o.isMesh) baseBox.expandByObject(o); });
+            if (!baseBox.isEmpty()) {
+                var ctr = baseBox.getCenter(new THREE.Vector3());
+                /* ctr está em world; baseSpin é filho de boxPivot (que pode ter
+                   quaternion). Converter ctr para o espaço local de boxPivot. */
+                var ctrLocal = boxPivot.worldToLocal(ctr.clone());
+                insertData.baseSpinPivot = ctrLocal;          /* onde pôr o baseSpin */
+                insertData.boxGroupBase  = boxGroup.position.clone(); /* posição original */
+            }
+            /* centro da LID (para centrar a câmara nela durante o insert) */
+            if (lidGroup) {
+                var lidBox = new THREE.Box3();
+                lidGroup.traverse(function(o){ if (o.isMesh) lidBox.expandByObject(o); });
+                if (!lidBox.isEmpty()) {
+                    insertData.lidCenter = boxPivot.worldToLocal(lidBox.getCenter(new THREE.Vector3()));
+                }
+            }
+
+            /* ── Ajustar baseDepth medindo o estado final do encaixe ──
+               Aplicamos o estado final (base rodada+deslocada, lid fechado) e
+               medimos o eixo de aproximação (Z em world). Queremos que o TOPO da
+               base toque o FUNDO da tampa fechada — sem penetrar nem ficar curto.
+               O ajuste é a diferença medida, somada ao baseDepth. */
+            if (lidGroup && insertData.baseSpinPivot) {
+                insertData.baseCorr = { x: 0, z: 0 };
+                /* Mede o estado final do encaixe → centros (X,Z) da base e da
+                   tampa em world. */
+                function measureCenters() {
+                    enterInsertMode();
+                    applyInsertProgress(1);
+                    scene.updateMatrixWorld(true);
+                    var bB = new THREE.Box3();
+                    boxGroup.traverse(function(o){ if (o.isMesh) bB.expandByObject(o); });
+                    var lB = new THREE.Box3();
+                    lidGroup.traverse(function(o){ if (o.isMesh) lB.expandByObject(o); });
+                    exitInsertMode();
+                    if (bB.isEmpty() || lB.isEmpty()) return null;
+                    return {
+                        b: bB.getCenter(new THREE.Vector3()),
+                        l: lB.getCenter(new THREE.Vector3()),
+                    };
+                }
+                /* Iterar o sistema 2x2 até o gap convergir a ~0. Cada iteração
+                   sonda a sensibilidade real e resolve; repetir absorve não-
+                   linearidades e gaps grandes. */
+                for (var iter = 0; iter < 4; iter++) {
+                    var m0 = measureCenters();
+                    if (!m0) break;
+                    insertData.baseCorr.x += 10;
+                    var mX = measureCenters();
+                    insertData.baseCorr.x -= 10;
+                    insertData.baseCorr.z += 10;
+                    var mZ = measureCenters();
+                    insertData.baseCorr.z -= 10;
+                    if (!mX || !mZ) break;
+                    var dXperX = (mX.b.x - m0.b.x) / 10;
+                    var dZperX = (mX.b.z - m0.b.z) / 10;
+                    var dXperZ = (mZ.b.x - m0.b.x) / 10;
+                    var dZperZ = (mZ.b.z - m0.b.z) / 10;
+                    var gapX = m0.l.x - m0.b.x;
+                    var gapZ = m0.l.z - m0.b.z;
+                    if (Math.abs(gapX) < 1 && Math.abs(gapZ) < 1) break; /* convergiu */
+                    var det = dXperX * dZperZ - dXperZ * dZperX;
+                    if (Math.abs(det) < 1e-6) break;
+                    insertData.baseCorr.x += ( gapX * dZperZ - dXperZ * gapZ) / det;
+                    insertData.baseCorr.z += (dXperX * gapZ -  gapX * dZperX) / det;
+                    console.log('[INSERT] iter', iter, ' gapX=', gapX.toFixed(1), ' gapZ=', gapZ.toFixed(1),
+                                ' corr=', insertData.baseCorr.x.toFixed(1), insertData.baseCorr.z.toFixed(1));
+                }
+            }
+
+            updateFolds(animT);             /* restaurar estado de dobra */
+        }
+
+        buildAxes(baseL, baseW, maxH);
+
+        /* Eixos no canto BL de p0.
+           0330: mover para boxPivot (acima do baseSpin) para não rodar com a base.
+           Copiar rotação do boxGroup para manter a mesma orientação visual. */
+        if (axesHelper) {
+            var blLx = mm(ab.minX - off.x), blLz = mm(ab.maxY - off.y);
+            if (geo.type === 'FEFCO_0330') {
+                boxGroup.remove(axesHelper);
+                boxPivot.add(axesHelper);
+                axesHelper.rotation.copy(boxGroup.rotation);
+                axesHelper.position.set(
+                    boxGroup.position.x + blLx,
+                    boxGroup.position.y + blLz,
+                    0
+                );
+            } else {
+                axesHelper.position.set(blLx, 0, blLz);
+            }
+        }
+
+        /* DEBUG: 4 cantos de p0 em coords locais do boxGroup.
+           sceneOf usa mm(p.x-off.x) sem subtrair p0cx — o deslocamento
+           já está no boxGroup.position. Logo os cantos locais são directos. */
+        (function() {
+            var corners = [
+                { n:'TL(minX,minY)', lx: mm(ab.minX-off.x), lz: mm(ab.minY-off.y), col: 0xff4444 },
+                { n:'TR(maxX,minY)', lx: mm(ab.maxX-off.x), lz: mm(ab.minY-off.y), col: 0x44cc44 },
+                { n:'BL(minX,maxY)', lx: mm(ab.minX-off.x), lz: mm(ab.maxY-off.y), col: 0x4488ff },
+                { n:'BR(maxX,maxY)', lx: mm(ab.maxX-off.x), lz: mm(ab.maxY-off.y), col: 0xffcc00 },
+            ];
+            /* world: Rx(-90°) + boxGroup.position → wx=pos.x+lx, wy=pos.y+lz */
+            var px = boxGroup.position.x, py = boxGroup.position.y;
+            console.group('[P0 corners] type=' + geo.type);
+            corners.forEach(function(c) {
+                console.log(c.n, '→ world(', (px+c.lx).toFixed(1), ',', (py+c.lz).toFixed(1), ', 0)');
+            });
+            console.groupEnd();
+
+            corners.forEach(function(c) {
+                var sg = new THREE.SphereGeometry(6, 8, 8);
+                var sm = new THREE.MeshBasicMaterial({ color: c.col, depthTest: false });
+                var sp = new THREE.Mesh(sg, sm);
+                sp.renderOrder = 12;
+                sp.position.set(c.lx, 0, c.lz);
+                boxGroup.add(sp);
+
+                var cv = document.createElement('canvas');
+                cv.width = 256; cv.height = 56;
+                var ctx = cv.getContext('2d');
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.beginPath(); ctx.roundRect(2, 2, 252, 52, 8); ctx.fill();
+                ctx.fillStyle = '#' + c.col.toString(16).padStart(6,'0');
+                ctx.font = 'bold 22px monospace';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(c.n, 128, 28);
+                var sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+                sprite.renderOrder = 13;
+                sprite.scale.set(160, 35, 1);
+                sprite.position.set(c.lx, 20, c.lz);
+                boxGroup.add(sprite);
+            });
+        })();
+
+        sceneCenter = { x: 0, y: 0, z: 0 };
+
         updateInfo(geo);
         /* Recalcular tamanho do canvas após construção — sidebar pode ter mudado */
         resizeRenderer();
@@ -364,7 +586,7 @@
         (function() {
             var cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
             var ctx = cv.getContext('2d');
-            ctx.fillStyle = 'rgba(255,230,0,0.92)'; ctx.fillRect(0,0,256,256);
+            ctx.fillStyle = node._isLid ? 'rgba(100,180,255,0.92)' : 'rgba(255,230,0,0.92)'; ctx.fillRect(0,0,256,256);
             ctx.fillStyle = '#000'; ctx.font = 'bold 160px sans-serif'; ctx.textAlign = 'center';
             ctx.fillText(node.key.replace('panel_','p'), 128, 190);
             var lbl = new THREE.Mesh(
@@ -439,8 +661,8 @@
     /* ── GEOMETRIA DE POLÍGONOS ──────────────────────────────────── */
 
     function makeMatSide(color, side, order) {
-        return new THREE.MeshLambertMaterial(applyPolyOffset({
-            color: color, side: side,
+        return new THREE.MeshStandardMaterial(applyPolyOffset({
+            color: color, side: side, roughness: 0.85, metalness: 0,
         }, order));
     }
 
@@ -532,8 +754,8 @@
            decorativa). */
         var edgeGeo = buildEdgeGeometry(shape, halfT);
         if (edgeGeo) {
-            var edgeMat = new THREE.MeshLambertMaterial(applyPolyOffset({
-                color: darken(color, 0.8), side: THREE.DoubleSide,
+            var edgeMat = new THREE.MeshStandardMaterial(applyPolyOffset({
+                color: darken(color, 0.8), side: THREE.DoubleSide, roughness: 0.9, metalness: 0,
             }, order));
             var edge = new THREE.Mesh(edgeGeo, edgeMat);
             edge.name = key + '_edge';
@@ -661,12 +883,22 @@
     }
 
     function updateFolds(t) {
+        /* Timeline combinada (só quando há insertData / FEFCO_0330):
+             0 … INSERT_START  → dobras das abas (remapeadas para 0..1)
+             INSERT_START … 1  → sequência de encaixe base+lid
+           Sem insertData, as dobras usam o t inteiro (0..1) como antes. */
+        var hasInsert = !!(insertData && baseSpin);
+        var foldT = t;
+        if (hasInsert) {
+            foldT = INSERT_START > 0 ? Math.min(t, INSERT_START) / INSERT_START : t;
+        }
+
         for (var i = 0; i < folds.length; i++) {
             var f = folds[i];
-            /* mapear t global para t local [0,1] dentro da janela desta dobra */
+            /* mapear foldT global para t local [0,1] dentro da janela desta dobra */
             var tS = f.tStart !== undefined ? f.tStart : 0;
             var tE = f.tEnd   !== undefined ? f.tEnd   : 1;
-            var tLocal = tE > tS ? (t - tS) / (tE - tS) : t;
+            var tLocal = tE > tS ? (foldT - tS) / (tE - tS) : foldT;
             tLocal = Math.max(0, Math.min(1, tLocal));
             var k = ease(tLocal);
             f.pivot.rotation.x = k * deg2rad(f.angle) * f.sign;
@@ -674,28 +906,103 @@
         /* Animar translação XYZ do lid: do estado plano para encaixe por cima */
         if (lidGroup && lidAnimData) {
             var la = lidAnimData;
-            var tLid = la.tEnd > la.tStart ? (t - la.tStart) / (la.tEnd - la.tStart) : t;
+            var tLid = la.tEnd > la.tStart ? (foldT - la.tStart) / (la.tEnd - la.tStart) : foldT;
             tLid = Math.max(0, Math.min(1, tLid));
             var kLid = ease(tLid);
             lidGroup.position.x = la.flatX + kLid * (la.mountX - la.flatX);
             lidGroup.position.y = la.flatY + kLid * (la.mountY - la.flatY);
             lidGroup.position.z = la.flatZ + kLid * (la.mountZ - la.flatZ);
         }
+
+        /* Fase de encaixe (base+lid) na segunda parte da timeline. */
+        if (hasInsert) {
+            if (t >= INSERT_START) {
+                enterInsertMode();
+                var p = (t - INSERT_START) / (1 - INSERT_START);
+                applyInsertProgress(Math.max(0, Math.min(1, p)));
+            } else {
+                exitInsertMode();
+            }
+        }
     }
 
     function clearScene() {
         if (boxPivot) { scene.remove(boxPivot); boxPivot = null; }
         boxGroup = null;
+        baseSpin = null;
         lidGroup = null;
         lidAnimData = null;
+        insertData = null;
+        insertT = 0; insertDir = 1;
+        _insertActive = false;
+        var btnInsert = document.getElementById('ctrl-insert');
+        if (btnInsert) btnInsert.style.display = 'none';
         folds = [];
         meshMap = {};
     }
 
-    /* ── AXES ───────────────────────────────────────────────────── */
-    function buildAxes() {
-        if (axesHelper) { scene.remove(axesHelper); axesHelper = null; }
-        /* eixos removidos — não têm utilidade para o utilizador final */
+    /* ── AXES LWH — presos ao boxPivot, rodam com a caixa ─────── */
+    function buildAxes(dimL, dimW, dimH) {
+        if (axesHelper) { if (axesHelper.parent) axesHelper.parent.remove(axesHelper); axesHelper = null; }
+        if (!boxGroup || !dimL) return;
+
+        var L = dimL, W = dimW, H = dimH;
+        var axLen = Math.max(L, W, H) * 0.55 * 3.5;
+
+        axesHelper = new THREE.Group();
+        axesHelper.position.set(0, 0, 0);
+
+        function makeArrow(dx, dy, dz, hex, labelTxt) {
+            var g = new THREE.Group();
+            var mat = new THREE.MeshBasicMaterial({ color: hex, depthTest: false, transparent: true, opacity: 0.85 });
+
+            /* haste */
+            var rodGeo = new THREE.CylinderGeometry(axLen * 0.006, axLen * 0.006, axLen * 0.78, 8);
+            var rod = new THREE.Mesh(rodGeo, mat);
+            rod.renderOrder = 5;
+            /* CylinderGeometry cresce em Y local — alinhar com a direcção */
+            if (dx) rod.rotation.z = -Math.PI / 2;
+            else if (dz) rod.rotation.x = dz > 0 ? Math.PI / 2 : -Math.PI / 2;
+            rod.position.set(dx * axLen * 0.39, dy * axLen * 0.39, dz * axLen * 0.39);
+            g.add(rod);
+
+            /* cone (seta) */
+            var coneH = axLen * 0.18;
+            var coneGeo = new THREE.ConeGeometry(axLen * 0.018, coneH, 8);
+            var cone = new THREE.Mesh(coneGeo, mat);
+            cone.renderOrder = 5;
+            if (dx) cone.rotation.z = -Math.PI / 2;
+            else if (dz) cone.rotation.x = dz > 0 ? Math.PI / 2 : -Math.PI / 2;
+            cone.position.set(dx * (axLen * 0.78 + coneH / 2), dy * (axLen * 0.78 + coneH / 2), dz * (axLen * 0.78 + coneH / 2));
+            g.add(cone);
+
+            /* label */
+            var cv = document.createElement('canvas');
+            cv.width = 64; cv.height = 64;
+            var lctx = cv.getContext('2d');
+            lctx.font = 'bold 46px sans-serif';
+            lctx.textAlign = 'center'; lctx.textBaseline = 'middle';
+            lctx.fillStyle = '#' + hex.toString(16).padStart(6, '0');
+            lctx.fillText(labelTxt, 32, 34);
+            var sp = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true,
+            }));
+            sp.renderOrder = 6;
+            var s = axLen * 0.28;
+            sp.scale.set(s, s, 1);
+            var tip = axLen * 0.78 + coneH;
+            sp.position.set(dx * (tip + s * 0.6), dy * (tip + s * 0.6), dz * (tip + s * 0.6));
+            g.add(sp);
+            return g;
+        }
+
+        /* Espaço local do boxGroup (antes de rotation.x=-PI/2):
+           +X = L (direita), +Y = W (profundidade), -Z = H (cima no mundo) */
+        axesHelper.add(makeArrow(1, 0, 0, 0xff4444, 'L'));
+        axesHelper.add(makeArrow(0, 1, 0, 0x4488ff, 'W'));
+        axesHelper.add(makeArrow(0, 0, -1, 0x44cc44, 'H'));
+
+        boxGroup.add(axesHelper);
     }
 
     /* ── INFO / SLIDER ──────────────────────────────────────────── */
@@ -791,9 +1098,31 @@
         renderer = new THREE.WebGLRenderer({ canvas: c3, antialias: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-        var d1 = new THREE.DirectionalLight(0xffffff, 0.7); d1.position.set(300, 500, 300); scene.add(d1);
-        var d2 = new THREE.DirectionalLight(0x88aaff, 0.3); d2.position.set(-250, 150, -200); scene.add(d2);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+        var d1 = new THREE.DirectionalLight(0xffffff, 1.2); d1.position.set(300, 500, 300); scene.add(d1);
+        var d2 = new THREE.DirectionalLight(0x88aaff, 0.5); d2.position.set(-250, 150, -200); scene.add(d2);
+        var d3 = new THREE.DirectionalLight(0xffe8c0, 0.3); d3.position.set(0, -200, 200); scene.add(d3);
+
+        /* DEBUG: esfera + label no centro do mundo (0,0,0) */
+        (function() {
+            var sGeo = new THREE.SphereGeometry(8, 8, 8);
+            var sMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, depthTest: false });
+            var sphere = new THREE.Mesh(sGeo, sMat);
+            sphere.renderOrder = 10;
+            scene.add(sphere);
+            var cv = document.createElement('canvas');
+            cv.width = 256; cv.height = 64;
+            var ctx = cv.getContext('2d');
+            ctx.fillStyle = '#ff00ff';
+            ctx.font = 'bold 28px monospace';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('CENTRO (0,0,0)', 128, 32);
+            var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+            sp.renderOrder = 11;
+            sp.scale.set(200, 50, 1);
+            sp.position.set(0, 30, 0);
+            scene.add(sp);
+        })();
 
         /* inicializar quaternion de rotação */
         rotQuat = new THREE.Quaternion();
@@ -850,7 +1179,10 @@
                total quase igual mas suaviza o arranque/fecho. */
             var EDGE = 0.35; /* fracção de velocidade mínima nos extremos */
             var ramp = EDGE + (1 - EDGE) * Math.sin(Math.PI * animT);
-            animT += 0.0046 * ramp * animDir;
+            /* Fase de encaixe (rotações grandes da base+lid) é mais lenta para
+               não parecer cómica. */
+            var phaseSpeed = (insertData && animT >= INSERT_START) ? 0.40 : 1.0;
+            animT += 0.0046 * ramp * phaseSpeed * animDir;
             if (animT >= 1) { animT = 1; animDir = -1; }
             if (animT <= 0) { animT = 0; animDir =  1; }
             updateSlider(Math.round(animT * 100));
@@ -863,6 +1195,69 @@
         if (animRAF) cancelAnimationFrame(animRAF);
         var icon = document.getElementById('ctrl-anim-icon');
         if (icon) icon.className = 'fa fa-play';
+    }
+
+    /* Normal (world) de um painel. A mesh é uma ShapeGeometry no plano XY
+       local, com a face exterior virada para +Z local. Basta transformar o
+       eixo +Z local pela rotação mundial da mesh. */
+    function panelWorldNormal(panelKey) {
+        var mesh = meshMap[panelKey + '_outer'];
+        if (!mesh) return null;
+        mesh.updateMatrixWorld(true);
+        var n = new THREE.Vector3(0, 0, 1);
+        var q = new THREE.Quaternion();
+        mesh.getWorldQuaternion(q);
+        return n.applyQuaternion(q).normalize();
+    }
+
+    /* Setup do modo insert (idempotente): só posiciona o pivô da base sobre o
+       seu centro (para a rotação ser no sítio) e prepara a ordem de rotação.
+       NÃO mexe na câmara (mantém a vista do utilizador) nem aplica rotação fixa
+       — o 90°/180° são animados em applyInsertProgress. */
+    function enterInsertMode() {
+        if (_insertActive || !insertData) return;
+        _insertActive = true;
+        if (baseSpin && boxGroup && insertData.baseSpinPivot) {
+            baseSpin.position.copy(insertData.baseSpinPivot);
+            boxGroup.position.copy(insertData.boxGroupBase).sub(insertData.baseSpinPivot);
+            baseSpin.rotation.order = 'ZYX';
+        }
+    }
+
+    /* Teardown do modo insert (idempotente): repõe base e lid ao estado da
+       caixa montada (sem encaixe). NÃO toca na câmara. */
+    function exitInsertMode() {
+        if (!_insertActive) return;
+        _insertActive = false;
+        if (baseSpin) { baseSpin.rotation.set(0, 0, 0); baseSpin.position.set(0, 0, 0); }
+        if (boxGroup && insertData && insertData.boxGroupBase) boxGroup.position.copy(insertData.boxGroupBase);
+        if (lidGroup && insertData && insertData.lidNatural) lidGroup.position.copy(insertData.lidNatural);
+    }
+
+    /* Progresso da animação de encaixe, p em [0,1]:
+       FASE 1 (p 0→0.5): base vira de costas (180° Y, animado) + roda 90° (Z) +
+                         desloca-se para a sua posição (encaixe + offset Z).
+       FASE 2 (p 0.5→1): lid fecha em direção à base. */
+    function applyInsertProgress(p) {
+        if (!insertData || !baseSpin) return;
+        var kBase = ease(Math.min(p, 0.5) / 0.5);
+        var kLid  = ease(Math.max(p - 0.5, 0) / 0.5);
+
+        baseSpin.rotation.y = kBase * Math.PI;        /* 180° de costas, animado */
+        baseSpin.rotation.z = kBase * (Math.PI / 2);  /* 90° sobre si mesma */
+        if (insertData.baseSpinPivot) {
+            /* Deslocamento original (baseDx/baseDz/baseDepth) que leva a base para
+               sob o lid + correção world medida (baseCorr) para afinar o encaixe. */
+            var corr = insertData.baseCorr || { x: 0, z: 0 };
+            baseSpin.position.set(
+                insertData.baseSpinPivot.x + (insertData.baseDx + corr.x) * kBase,
+                insertData.baseSpinPivot.y,
+                insertData.baseSpinPivot.z + (insertData.baseDz + insertData.baseDepth + corr.z) * kBase
+            );
+        }
+        if (lidGroup) {
+            lidGroup.position.lerpVectors(insertData.lidNatural, insertData.lidEncaix, kLid);
+        }
     }
 
 
@@ -901,15 +1296,17 @@
     wire('ctrl-2d',     function () { setView('2d'); });
     wire('ctrl-logo2d', function () { setView('logo2d'); });
     wire('ctrl-anim', function () { animPlaying ? stopAnim() : startAnim(); });
+    /* Botão insert desativado — a sequência de encaixe é agora parte do play
+       normal (dobras 0→INSERT_START, encaixe INSERT_START→1).
+    wire('ctrl-insert', function () { insertPlaying ? stopInsert() : startInsert(); });
+    */
     wire('ctrl-rotate', function () { autoRotate = !autoRotate; var el = document.getElementById('ctrl-rotate'); if (el) el.classList.toggle('active', autoRotate); });
     wire('ctrl-zoom-in',  function () { sph.r = Math.max(ZOOM_MIN, sph.r - sceneSize * 0.08); updateCam(); });
     wire('ctrl-zoom-out', function () { sph.r = Math.min(ZOOM_MAX, sph.r + sceneSize * 0.08); updateCam(); });
     wire('ctrl-reset', function () {
-        stopAnim(); animT = 0; animDir = 1; updateSlider(0); updateFolds(0);
-        if (rotQuat && boxPivot) {
-            rotQuat.setFromEuler(new THREE.Euler(Math.PI, 0, 0));
-            boxPivot.quaternion.copy(rotQuat);
-        }
+        stopAnim(); animT = 0; animDir = 1; updateSlider(0);
+        exitInsertMode();      /* repõe base/lid/câmara do encaixe */
+        updateFolds(0);        /* planifica as dobras */
         sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7; updateCam();
     });
 
@@ -954,12 +1351,17 @@
        contrário dos filhos onde _inner é o exterior. Corrigir aqui. */
     function _resolveRootSuffix(meshKey) {
         if (!_activeGeo) return meshKey;
-        var rootKey = _activeGeo.rootKey;
-        if (!rootKey) return meshKey;
-        /* meshKey = 'panel_X_inner' ou 'panel_X_outer' */
         var innerSuffix = '_inner', outerSuffix = '_outer';
-        if (meshKey === rootKey + innerSuffix) return rootKey + outerSuffix;
-        if (meshKey === rootKey + outerSuffix) return rootKey + innerSuffix;
+        function swap(rk) {
+            if (meshKey === rk + innerSuffix) return rk + outerSuffix;
+            if (meshKey === rk + outerSuffix) return rk + innerSuffix;
+            return null;
+        }
+        var rootKey = _activeGeo.rootKey;
+        if (rootKey) { var s = swap(rootKey); if (s) return s; }
+        /* FEFCO_0330: a base (panel_0) tem rotation.x=PI/2 mas não é o rootKey
+           (esse é o lid). Precisa da mesma inversão inner↔outer. */
+        if (_activeGeo.type === 'FEFCO_0330') { var sb = swap('panel_0'); if (sb) return sb; }
         return meshKey;
     }
 
@@ -980,8 +1382,8 @@
         mesh._logoTex = tex;
         var side = mesh.material.side;
         mesh.material.dispose();
-        mesh.material = new THREE.MeshLambertMaterial(applyPolyOffset({
-            map: tex, side: side,
+        mesh.material = new THREE.MeshStandardMaterial(applyPolyOffset({
+            map: tex, side: side, roughness: 0.85, metalness: 0,
         }, mesh.userData.order || 0));
     }
 
@@ -1059,7 +1461,7 @@
                 var btn = document.getElementById('atp-btn-addcart');
                 if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin me-2"/>A guardar...'; }
                 saveOrderDieline()
-                    .then(function(res) {
+                    .then(function(res) {c
                         var configInput = document.getElementById('cart-dieline-config-id');
                         if (configInput && res.dieline_config_id) {
                             configInput.value = res.dieline_config_id;

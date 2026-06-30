@@ -642,6 +642,31 @@ def _inject_logos_into_svg(svg_text, artwork, prod, rec):
         inject.append(dim_line_svg(lx, ly, lx, ly - lh / 2, lh_mm / 2))
         inject.append(dim_line_svg(lx, ly, lx, ly + lh / 2, lh_mm / 2))
 
+        # Cotas de POSIÇÃO (distância do logo às bordas do painel) — as mesmas
+        # que aparecem no 2D logo. Coords vêm em SVG-px do original → escalar.
+        pd = logo.get('posDims')
+        if pd and pd.get('bbox') and pd.get('ext'):
+            bb = pd['bbox']
+            ex = pd['ext']
+
+            def _sx(v):
+                return float(v) * sx * vb_scale_x
+
+            def _sy(v):
+                return float(v) * sy * vb_scale_y
+
+            b_minx, b_maxx = _sx(bb['minX']), _sx(bb['maxX'])
+            b_miny, b_maxy = _sy(bb['minY']), _sy(bb['maxY'])
+            e_minx, e_maxx = _sx(ex['minX']), _sx(ex['maxX'])
+            e_miny, e_maxy = _sy(ex['minY']), _sy(ex['maxY'])
+            mid_x = (b_minx + b_maxx) / 2.0
+            mid_y = (b_miny + b_maxy) / 2.0
+            # seta aponta para o logo (do extremo do painel até à borda do logo)
+            inject.append(dim_line_svg(e_minx, mid_y, b_minx, mid_y, pd.get('left', 0)))
+            inject.append(dim_line_svg(e_maxx, mid_y, b_maxx, mid_y, pd.get('right', 0)))
+            inject.append(dim_line_svg(mid_x, e_miny, mid_x, b_miny, pd.get('top', 0)))
+            inject.append(dim_line_svg(mid_x, e_maxy, mid_x, b_maxy, pd.get('bottom', 0)))
+
     if not inject:
         return svg_text
 

@@ -822,6 +822,85 @@
     /* ── TemplateMapper FEFCO_04XX ─────────────────────────────── */
     function templateFEFCO_04XX(nodes) { templateGeneric(nodes); }
 
+    /* ── Mapper genérico por conectividade de FOLD ─────────────────
+       Para caixas onde o DCEL escolhe um root errado (ex.: a tampa em vez do
+       tubo). Escolhe o root pela MAIOR conectividade de fold edges, refaz a
+       árvore por BFS priorizando folds (1º passe folds, 2º passe cuts), e
+       deriva foldSign (geometria) + animGroup (profundidade). */
+    function _foldTreeByConnectivity(nodes) {
+        var nodeByKey = {};
+        nodes.forEach(function (n) { nodeByKey[n.key] = n; });
+        var adj = nodes._adj || {};
+
+        function foldDegree(k) {
+            return (adj[k] || []).filter(function (l) { return l.isFold; }).length;
+        }
+        var root = nodes[0];
+        nodes.forEach(function (n) {
+            var d = foldDegree(n.key), dr = foldDegree(root.key);
+            if (d > dr || (d === dr && polyArea(n.points) > polyArea(root.points))) root = n;
+        });
+
+        var seen = {}, foldQ = [root.key], cutQ = [];
+        seen[root.key] = true;
+        root.parentKey = null; root.edge = null;
+
+        function processQueue(q, foldOnly) {
+            while (q.length) {
+                var cur = q.shift();
+                (adj[cur] || []).forEach(function (lk) {
+                    if (seen[lk.otherKey]) return;
+                    if (foldOnly && !lk.isFold) { cutQ.push({ from: cur, lk: lk }); return; }
+                    seen[lk.otherKey] = true;
+                    var child = nodeByKey[lk.otherKey];
+                    if (child) { child.parentKey = cur; child.edge = lk.edge; child.isFoldEdge = lk.isFold; }
+                    if (lk.isFold) foldQ.push(lk.otherKey); else cutQ.push(lk.otherKey);
+                });
+            }
+        }
+        processQueue(foldQ, true);
+        var cutKeys = [];
+        cutQ.forEach(function (item) {
+            if (typeof item === 'string') { cutKeys.push(item); return; }
+            if (!seen[item.lk.otherKey]) {
+                seen[item.lk.otherKey] = true;
+                var child = nodeByKey[item.lk.otherKey];
+                if (child) { child.parentKey = item.from; child.edge = item.lk.edge; child.isFoldEdge = false; }
+                cutKeys.push(item.lk.otherKey);
+            }
+        });
+        processQueue(cutKeys, false);
+        nodes.forEach(function (n) { if (!seen[n.key]) { n.parentKey = root.key; n.edge = null; } });
+
+        var depth = {}, dq = [root.key];
+        depth[root.key] = 0;
+        while (dq.length) {
+            var cur = dq.shift();
+            nodes.forEach(function (n) {
+                if (n.parentKey === cur && depth[n.key] === undefined) {
+                    depth[n.key] = depth[cur] + 1; dq.push(n.key);
+                }
+            });
+        }
+
+        nodes.forEach(function (n) {
+            if (n.parentKey == null) { n.foldSign = -1; n.animGroup = 0; return; }
+            n.foldSign = defaultFoldSign(n, nodeByKey[n.parentKey] || null);
+            n.animGroup = depth[n.key] !== undefined ? depth[n.key] : 1;
+        });
+    }
+
+    /* ── TemplateMapper FEFCO_0426 ─────────────────────────────────
+       Caixa com fundo automático (crash-lock) + tampa com aba de fecho. */
+    function templateFEFCO_0426(nodes) { _foldTreeByConnectivity(nodes); }
+
+    /* ── TemplateMapper FEFCO_0473 ─────────────────────────────────
+       Caixa com fita biadesiva (montagem rápida). Tem uma aba de canto que
+       dobra na diagonal — daí a topologia de fold ser pouco intuitiva. Usa o
+       mapper genérico por conectividade de fold; afinar foldSign/animGroup
+       depois de ver no 3D. */
+    function templateFEFCO_0473(nodes) { _foldTreeByConnectivity(nodes); }
+
     /* ── TemplateMapper FEFCO_0422 ─────────────────────────────── */
     function templateFEFCO_0422(nodes) {
         var nodeByKey = {};
@@ -980,11 +1059,11 @@
             return result;
         }
 
-        var lidSide  = nodes.filter(function(n) { return polyCentroid(n.points).x <= midX; });
-        var baseSide = nodes.filter(function(n) { return polyCentroid(n.points).x >  midX; });
+        var leftSide  = nodes.filter(function(n) { return polyCentroid(n.points).x <= midX; });
+        var rightSide = nodes.filter(function(n) { return polyCentroid(n.points).x >  midX; });
 
-        var lidNodes  = pickLargestComponent(lidSide);
-        var baseNodes = pickLargestComponent(baseSide);
+        var leftNodes  = pickLargestComponent(leftSide);
+        var rightNodes = pickLargestComponent(rightSide);
 
         /* Raiz de cada grupo = painel de maior área */
         function largestPanel(list) {
@@ -992,26 +1071,60 @@
             list.forEach(function(n) { if (polyArea(n.points) > polyArea(best.points)) best = n; });
             return best;
         }
-        var baseRoot = largestPanel(baseNodes);
-        var lidRoot  = largestPanel(lidNodes);
+        var leftRoot  = largestPanel(leftNodes);
+        var rightRoot = largestPanel(rightNodes);
 
-        /* Reconectar cada grupo à sua própria raiz via BFS */
+        /* LID = peça MAIOR (root de maior área); BASE = peça menor.
+           A distinção é por TAMANHO, não pela posição esquerda/direita. */
+        var lidNodes, baseNodes, lidRoot, baseRoot;
+        if (polyArea(leftRoot.points) >= polyArea(rightRoot.points)) {
+            lidNodes = leftNodes;  lidRoot = leftRoot;
+            baseNodes = rightNodes; baseRoot = rightRoot;
+        } else {
+            lidNodes = rightNodes; lidRoot = rightRoot;
+            baseNodes = leftNodes;  baseRoot = leftRoot;
+        }
+
+        /* Reconectar cada grupo à sua própria raiz via BFS prioritizando fold edges.
+           Dois passes: 1º só fold edges, 2º cut edges para os não visitados.
+           Isto garante que abas ligadas por fold a um lado (ex: panel_9) ficam
+           como filhas desse lado e não do root — mesmo que o root as toque por cut. */
         function rewireGroup(groupNodes, root) {
             var byKey = {};
             groupNodes.forEach(function(n) { byKey[n.key] = true; });
-            var seen = {}, queue = [root.key];
+            var seen = {}, foldQ = [root.key], cutQ = [];
             seen[root.key] = true;
             root.parentKey = null;
-            while (queue.length) {
-                var cur = queue.shift();
-                (adj[cur] || []).forEach(function(lk) {
-                    if (!byKey[lk.otherKey] || seen[lk.otherKey]) return;
-                    seen[lk.otherKey] = true;
-                    var child = nodeByKey[lk.otherKey];
-                    if (child) { child.parentKey = cur; child.edge = lk.edge; child.isFoldEdge = lk.isFold; }
-                    queue.push(lk.otherKey);
-                });
+
+            function processQueue(q, foldOnly) {
+                while (q.length) {
+                    var cur = q.shift();
+                    (adj[cur] || []).forEach(function(lk) {
+                        if (!byKey[lk.otherKey] || seen[lk.otherKey]) return;
+                        if (foldOnly && !lk.isFold) { cutQ.push({from: cur, lk: lk}); return; }
+                        seen[lk.otherKey] = true;
+                        var child = nodeByKey[lk.otherKey];
+                        if (child) { child.parentKey = cur; child.edge = lk.edge; child.isFoldEdge = lk.isFold; }
+                        if (lk.isFold) foldQ.push(lk.otherKey); else cutQ.push(lk.otherKey);
+                    });
+                }
             }
+
+            /* 1º passe: só fold edges */
+            processQueue(foldQ, true);
+            /* 2º passe: cut edges pendentes (só os não visitados) */
+            var cutKeys = [];
+            cutQ.forEach(function(item) {
+                if (typeof item === 'string') { cutKeys.push(item); return; }
+                if (!seen[item.lk.otherKey]) {
+                    seen[item.lk.otherKey] = true;
+                    var child = nodeByKey[item.lk.otherKey];
+                    if (child) { child.parentKey = item.from; child.edge = item.lk.edge; child.isFoldEdge = false; }
+                    cutKeys.push(item.lk.otherKey);
+                }
+            });
+            processQueue(cutKeys, false);
+
             groupNodes.forEach(function(n) {
                 if (!seen[n.key]) { n.parentKey = root.key; n.edge = null; }
             });
@@ -1020,9 +1133,50 @@
         rewireGroup(baseNodes, baseRoot);
         rewireGroup(lidNodes,  lidRoot);
 
+        /* Para cada grupo: filhos directos do root ligados por cut que têm
+           vizinhos fold dentro do grupo → esses vizinhos devem ser filhos
+           deste nó (lado), não do root. Corrigir parentKey + edge. */
+        [baseNodes, lidNodes].forEach(function(groupNodes) {
+            var root = groupNodes.filter(function(n) { return n.parentKey === null; })[0];
+            if (!root) return;
+            var byKey = {};
+            groupNodes.forEach(function(n) { byKey[n.key] = true; });
+
+            /* Lados com cut ao root mas com filhos fold */
+            groupNodes.forEach(function(side) {
+                if (side.parentKey !== root.key || side.isFoldEdge) return;
+                /* filhos fold deste lado que estão actualmente sob root */
+                (adj[side.key] || []).forEach(function(lk) {
+                    if (!lk.isFold || !byKey[lk.otherKey]) return;
+                    var child = nodeByKey[lk.otherKey];
+                    if (!child || child.parentKey !== root.key) return;
+                    /* re-parentar para o lado */
+                    child.parentKey = side.key;
+                    child.edge = lk.edge;
+                    child.isFoldEdge = true;
+                });
+            });
+
+            /* Corrigir edge do lado → root usando bbox (distância mínima de lado) */
+            groupNodes.forEach(function(n) {
+                if (n.parentKey !== root.key) return;
+                var rb = bbox(root.points);
+                var nb = bbox(n.points);
+                var dR = Math.abs(nb.x0 - rb.x1), dL = Math.abs(nb.x1 - rb.x0);
+                var dB = Math.abs(nb.y0 - rb.y1), dT = Math.abs(nb.y1 - rb.y0);
+                var dMin = Math.min(dR, dL, dB, dT);
+                if (dMin > 20) return;
+                if (dMin === dR) n.edge = {x1: rb.x1, y1: rb.y1, x2: rb.x1, y2: rb.y0};
+                else if (dMin === dL) n.edge = {x1: rb.x0, y1: rb.y0, x2: rb.x0, y2: rb.y1};
+                else if (dMin === dB) n.edge = {x1: rb.x0, y1: rb.y1, x2: rb.x1, y2: rb.y1};
+                else                 n.edge = {x1: rb.x1, y1: rb.y0, x2: rb.x0, y2: rb.y0};
+            });
+        });
+
         baseRoot.parentKey = null;
         lidRoot.parentKey  = null;
         lidRoot._lidRoot   = true;
+        lidNodes.forEach(function(n) { n._isLid = true; });
 
         /* Remover os painéis da cópia duplicada (outro componente de cada lado) */
         var activeKeys = {};
@@ -1035,15 +1189,11 @@
         /* foldSign para todos */
         nodes.forEach(function(n) { n.foldSign = -1; });
 
-        /* animGroups:
-           ag 0 — fundo da base (root, estático)
-           ag 1 — lados da base
-           ag 2 — abas da base
-           ag 10 — fundo do lid (root do lid — translação no engine)
-           ag 11 — lados do lid
-           ag 12 — abas do lid */
-        function assignAnimGroupsForGroup(groupNodes, root, agBase) {
-            /* BFS por profundidade */
+        /* animGroups: base e lid usam os mesmos números para animarem em paralelo.
+           ag 0 — fundos (roots, estáticos)
+           ag 1 — lados de ambas as peças
+           ag 2 — abas de ambas as peças */
+        function assignAnimGroupsForGroup(groupNodes, root) {
             var depth = {}, queue2 = [root.key];
             depth[root.key] = 0;
             while (queue2.length) {
@@ -1055,27 +1205,34 @@
                     }
                 });
             }
+            var hasChildren = {};
+            groupNodes.forEach(function(n) { if (n.parentKey) hasChildren[n.parentKey] = true; });
             groupNodes.forEach(function(n) {
                 var d = depth[n.key] !== undefined ? depth[n.key] : 1;
-                n.animGroup = agBase + Math.min(d, 2);
+                if (d === 0) n.animGroup = 0;
+                else if (d === 2 && !hasChildren[n.key]) n.animGroup = 1;           /* abas folha — fecham primeiro */
+                else if (d === 1 && hasChildren[n.key]) n.animGroup = 2;           /* lados com filhos — fecham depois */
+                else n.animGroup = 3;                                                /* resto — último */
             });
         }
 
-        assignAnimGroupsForGroup(baseNodes, baseRoot, 0);
-        assignAnimGroupsForGroup(lidNodes,  lidRoot,  10);
+        assignAnimGroupsForGroup(baseNodes, baseRoot);
+        assignAnimGroupsForGroup(lidNodes,  lidRoot);
     }
 
     /* ── dispatcher ─────────────────────────────────────────────── */
     var TEMPLATE_MAPPERS = {
-        'FEFCO_0201': templateFEFCO_0201,
         'FEFCO_0200': templateFEFCO_0200,
-        'FEFCO_0216': templateFEFCO_0216,
+        'FEFCO_0201': templateFEFCO_0201,
         'FEFCO_0215': templateFEFCO_0215,
+        'FEFCO_0216': templateFEFCO_0216,
         'FEFCO_0330': templateFEFCO_0330,
-        'FEFCO_0427': templateFEFCO_0427,
-        'FEFCO_04XX': templateFEFCO_04XX,
         'FEFCO_0422': templateFEFCO_0422,
         'FEFCO_0425': templateFEFCO_0425,
+        'FEFCO_0426': templateFEFCO_0426,
+        'FEFCO_0427': templateFEFCO_0427,
+        'FEFCO_0473': templateFEFCO_0473,
+        'FEFCO_04XX': templateFEFCO_04XX,
         'GENERIC':    templateGeneric,
     };
 
@@ -1116,11 +1273,6 @@
 
         var boxType = type || (meta && meta.box_type) || 'GENERIC';
         applyTemplateMapper(nodes, boxType);
-        console.log('[parser] nodes after templateMapper: ' + nodes.length);
-        nodes.forEach(function(n) {
-            var b = bbox(n.points), cx = Math.round((b.x0+b.x1)/2), cy = Math.round((b.y0+b.y1)/2);
-            console.log('  ' + n.key + ' parent=' + n.parentKey + ' area=' + Math.round(polyArea(n.points)) + ' cx=' + cx + ' cy=' + cy + ' lidRoot=' + (n._lidRoot||false));
-        });
 
         /* unidade px/mm */
         var unit = 1;

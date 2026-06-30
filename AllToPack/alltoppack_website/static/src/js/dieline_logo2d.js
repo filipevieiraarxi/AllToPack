@@ -1009,6 +1009,22 @@
                     var u = geo ? (geo.unit || 1) : 1;
                     entry.svgW = lg.sizeMM * u;
                     entry.svgH = lg.sizeMM * aspect * u;
+
+                    /* Cotas de POSIÇÃO (distância do logo às bordas do painel),
+                       as mesmas que o 2D desenha. Gravamos em SVG-px + valor mm
+                       para o backend as reproduzir no download. */
+                    var bbox = logoBboxSvg(lg);
+                    var ext  = bbox ? cotaExtremes(bbox) : null;
+                    if (bbox && ext) {
+                        entry.posDims = {
+                            bbox: { minX: bbox.minX, maxX: bbox.maxX, minY: bbox.minY, maxY: bbox.maxY },
+                            ext:  { minX: ext.minX,  maxX: ext.maxX,  minY: ext.minY,  maxY: ext.maxY },
+                            left:   Math.max(0, (bbox.minX - ext.minX) / u),
+                            right:  Math.max(0, (ext.maxX - bbox.maxX) / u),
+                            top:    Math.max(0, (bbox.minY - ext.minY) / u),
+                            bottom: Math.max(0, (ext.maxY - bbox.maxY) / u),
+                        };
+                    }
                 }
                 result[key] = entry;
             });
