@@ -462,48 +462,6 @@
             }
         }
 
-        /* DEBUG: 4 cantos de p0 em coords locais do boxGroup.
-           sceneOf usa mm(p.x-off.x) sem subtrair p0cx — o deslocamento
-           já está no boxGroup.position. Logo os cantos locais são directos. */
-        (function() {
-            var corners = [
-                { n:'TL(minX,minY)', lx: mm(ab.minX-off.x), lz: mm(ab.minY-off.y), col: 0xff4444 },
-                { n:'TR(maxX,minY)', lx: mm(ab.maxX-off.x), lz: mm(ab.minY-off.y), col: 0x44cc44 },
-                { n:'BL(minX,maxY)', lx: mm(ab.minX-off.x), lz: mm(ab.maxY-off.y), col: 0x4488ff },
-                { n:'BR(maxX,maxY)', lx: mm(ab.maxX-off.x), lz: mm(ab.maxY-off.y), col: 0xffcc00 },
-            ];
-            /* world: Rx(-90°) + boxGroup.position → wx=pos.x+lx, wy=pos.y+lz */
-            var px = boxGroup.position.x, py = boxGroup.position.y;
-            console.group('[P0 corners] type=' + geo.type);
-            corners.forEach(function(c) {
-                console.log(c.n, '→ world(', (px+c.lx).toFixed(1), ',', (py+c.lz).toFixed(1), ', 0)');
-            });
-            console.groupEnd();
-
-            corners.forEach(function(c) {
-                var sg = new THREE.SphereGeometry(6, 8, 8);
-                var sm = new THREE.MeshBasicMaterial({ color: c.col, depthTest: false });
-                var sp = new THREE.Mesh(sg, sm);
-                sp.renderOrder = 12;
-                sp.position.set(c.lx, 0, c.lz);
-                boxGroup.add(sp);
-
-                var cv = document.createElement('canvas');
-                cv.width = 256; cv.height = 56;
-                var ctx = cv.getContext('2d');
-                ctx.fillStyle = 'rgba(0,0,0,0.7)';
-                ctx.beginPath(); ctx.roundRect(2, 2, 252, 52, 8); ctx.fill();
-                ctx.fillStyle = '#' + c.col.toString(16).padStart(6,'0');
-                ctx.font = 'bold 22px monospace';
-                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText(c.n, 128, 28);
-                var sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
-                sprite.renderOrder = 13;
-                sprite.scale.set(160, 35, 1);
-                sprite.position.set(c.lx, 20, c.lz);
-                boxGroup.add(sprite);
-            });
-        })();
 
         sceneCenter = { x: 0, y: 0, z: 0 };
 
@@ -1102,27 +1060,6 @@
         var d1 = new THREE.DirectionalLight(0xffffff, 1.2); d1.position.set(300, 500, 300); scene.add(d1);
         var d2 = new THREE.DirectionalLight(0x88aaff, 0.5); d2.position.set(-250, 150, -200); scene.add(d2);
         var d3 = new THREE.DirectionalLight(0xffe8c0, 0.3); d3.position.set(0, -200, 200); scene.add(d3);
-
-        /* DEBUG: esfera + label no centro do mundo (0,0,0) */
-        (function() {
-            var sGeo = new THREE.SphereGeometry(8, 8, 8);
-            var sMat = new THREE.MeshBasicMaterial({ color: 0xff00ff, depthTest: false });
-            var sphere = new THREE.Mesh(sGeo, sMat);
-            sphere.renderOrder = 10;
-            scene.add(sphere);
-            var cv = document.createElement('canvas');
-            cv.width = 256; cv.height = 64;
-            var ctx = cv.getContext('2d');
-            ctx.fillStyle = '#ff00ff';
-            ctx.font = 'bold 28px monospace';
-            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.fillText('CENTRO (0,0,0)', 128, 32);
-            var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
-            sp.renderOrder = 11;
-            sp.scale.set(200, 50, 1);
-            sp.position.set(0, 30, 0);
-            scene.add(sp);
-        })();
 
         /* inicializar quaternion de rotação */
         rotQuat = new THREE.Quaternion();

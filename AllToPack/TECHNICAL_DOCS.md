@@ -1,38 +1,53 @@
 # AllToPack — Documentação Técnica do Configurador 3D
 
+> Última actualização: 2026-07-01
+
 ## Índice
 
-1. [Visão geral do sistema](#1-visão-geral-do-sistema)
+1. [Arquitectura geral do sistema](#1-arquitectura-geral-do-sistema)
 2. [Formato SVG de entrada (Format B)](#2-formato-svg-de-entrada-format-b)
 3. [dieline_parser.js — Pipeline completa](#3-dieline_parserjs--pipeline-completa)
-4. [TemplateMapper — Como funciona e como adicionar uma nova caixa](#4-templatemapper--como-funciona-e-como-adicionar-uma-nova-caixa)
-5. [dieline_engine.js — Motor 3D](#5-dieline_enginejs--motor-3d)
-6. [dieline_logo2d.js — Compositor de logos](#6-dieline_logo2djs--compositor-de-logos)
-7. [Integração backend Odoo](#7-integração-backend-odoo)
-8. [Fluxo completo de dados](#8-fluxo-completo-de-dados)
-9. [Referência rápida de depuração](#9-referência-rápida-de-depuração)
+4. [TemplateMappers — Todos os tipos existentes](#4-templatemappers--todos-os-tipos-existentes)
+5. [Guia: Criar uma nova caixa (passo a passo)](#5-guia-criar-uma-nova-caixa-passo-a-passo)
+6. [dieline_engine.js — Motor 3D](#6-dieline_enginejs--motor-3d)
+7. [Sistema de animação de dobras](#7-sistema-de-animação-de-dobras)
+8. [dieline_logo2d.js — Compositor de logos](#8-dieline_logo2djs--compositor-de-logos)
+9. [dieline_generators.js — SVGs paramétricos](#9-dieline_generatorsjs--svgs-paramétricos)
+10. [Backend Odoo — Modelos e rotas](#10-backend-odoo--modelos-e-rotas)
+11. [APIs públicas](#11-apis-públicas)
+12. [Fluxo completo de dados](#12-fluxo-completo-de-dados)
+13. [Convenções de código e nomenclatura](#13-convenções-de-código-e-nomenclatura)
+14. [Cache-busting e deploy](#14-cache-busting-e-deploy)
 
 ---
 
-## 1. Visão geral do sistema
+## 1. Arquitectura geral do sistema
 
-O configurador 3D é composto por três camadas JavaScript independentes que comunicam através de objetos simples:
+O configurador 3D é uma stack de **três camadas independentes** que comunicam através de contratos simples:
 
 ```
-SVG (Format B)
-    │
-    ▼
-dieline_parser.js          ← extrai geometria DCEL + aplica TemplateMapper
-    │  output: geo { meta, unit, rootKey, type, nodes[] }
-    ▼
-dieline_engine.js          ← constrói modelo Three.js e anima dobras
-    │  output: meshMap { panel_0_outer, panel_0_inner, … }
-    ▼
-dieline_logo2d.js          ← compositor 2D de logos sobre o SVG
-       usa: ATP_DIELINE.getGeo() + ATP_DIELINE.applyLogoTexture()
+┌─ SVG Format B (entrada) ──────────────────────────────┐
+│  rgb(255,0,0) = cortes   rgb(0,0,255) = vincos        │
+│  <metadata> JSON com L/W/H/thickness/box_type          │
+└──────────────────┬────────────────────────────────────┘
+                   ▼
+          [dieline_parser.js]
+          Pipeline DCEL (7 etapas)
+          + TemplateMapper por tipo FEFCO
+                   │
+                   │  geo = { meta, unit, rootKey, type, nodes[] }
+                   ▼
+          [dieline_engine.js]
+          Motor 3D Three.js — completamente genérico
+          Constrói meshes, anima dobras, aplica texturas
+                   │
+                   │  ATP_DIELINE API pública
+                   ▼
+          [dieline_logo2d.js]
+          Compositor 2D de logos + sincronização 3D
 ```
 
-Nenhuma das três camadas conhece os detalhes das outras. O parser não sabe o que é o Three.js; o engine não sabe o que é um SVG. O objeto `geo` é a fronteira de contrato entre elas.
+**Princípio chave:** o engine 3D não tem qualquer conhecimento de topologia FEFCO. Toda a lógica específica de cada tipo de caixa vive exclusivamente no TemplateMapper do parser.
 
 ---
 
@@ -40,611 +55,739 @@ Nenhuma das três camadas conhece os detalhes das outras. O parser não sabe o q
 
 ### Estrutura obrigatória
 
-O SVG deve ter um elemento raiz com `id="root_group"`. Todos os elementos gráficos relevantes (linhas de corte e vinco) são filhos directos deste grupo.
-
 ```xml
-<svg xmlns="http://www.w3.org/2000/svg">
-  <metadata>{"length":200,"width":150,"height":100,"thickness":2}</metadata>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 W H">
+  <metadata>{"length":200,"width":150,"height":100,"thickness":2,"box_type":"FEFCO_0201"}</metadata>
   <g id="root_group">
     <line style="stroke:rgb(255,0,0)" x1="0" y1="0" x2="200" y2="0"/>
-    <line style="stroke:rgb(0,0,255)" x1="0" y1="100" x2="200" y2="100"/>
+    <line style="stroke:rgb(0,0,255)" x1="100" y1="0" x2="100" y2="300"/>
     <path style="stroke:rgb(255,0,0)" d="M 0,0 L 200,0 L 200,300 Z"/>
   </g>
 </svg>
 ```
 
-### Convenção de cores
+### Cores rigorosas (exatas)
 
-| Cor CSS | Código RGB | Significado |
-|---------|-----------|-------------|
-| Vermelho | `rgb(255,0,0)` | Linha de corte (contorno exterior) |
-| Azul | `rgb(0,0,255)` | Vinco / linha de dobra |
-| Verde | `rgb(0,128,0)` | Cotas dimensionais — **ignorado** pelo parser |
+| Cor | RGB | Significado |
+|-----|-----|-------------|
+| Vermelho | `rgb(255,0,0)` | Linhas de corte (contorno) |
+| Azul | `rgb(0,0,255)` | Linhas de vinco (dobras) |
+| Verde | `rgb(0,128,0)` | Cotas dimensionais (ignoradas pelo parser) |
 
-Apenas elementos `<line>` e `<path>` são processados. Todos os outros elementos são ignorados.
+### Campos da metadata JSON
 
-### Metadata
-
-O bloco `<metadata>` é JSON com os campos:
-
-| Campo | Tipo | Unidade | Descrição |
-|-------|------|---------|-----------|
-| `length` | number | mm | Comprimento interno da caixa |
-| `width` | number | mm | Largura interna |
-| `height` | number | mm | Altura interna |
-| `thickness` | number | mm | Espessura do cartão (default: 2) |
-| `box_type` | string | — | Tipo FEFCO (ex: `FEFCO_0201`) |
-
-O campo `box_type` na metadata é sobreposto pelo parâmetro `type` passado a `build(text, type)`.
+| Campo | Tipo | Unidade | Obrigatório |
+|-------|------|---------|-------------|
+| `length` | number | mm | Sim |
+| `width` | number | mm | Sim |
+| `height` | number | mm | Sim |
+| `thickness` | number | mm | Não (default: 5) |
+| `box_type` | string | — | Não (default: GENERIC) |
 
 ### Caixas de 2 peças (Format B2BA)
 
-Para caixas como a FEFCO_0330 (base + tampa separadas), o SVG contém 4 grupos:
-- Cada peça (base e tampa) aparece duas vezes no SVG — uma vista de cima e outra de baixo.
-- O parser separa automaticamente as cópias usando conectividade dos painéis via grafo DCEL.
-- O TemplateMapper específico (ex: `templateFEFCO_0330`) usa `midX` para distinguir esquerda (tampa) de direita (base) e selecciona o componente conexo maior de cada lado.
+Para caixas com base e tampa separadas (ex: FEFCO_0330), o SVG contém **4 grupos** — base (vista cima + vista baixo) e tampa (vista cima + vista baixo). O parser detecta os 2 componentes conexos por `midX` e usa apenas o maior de cada lado.
+
+### Elementos suportados
+
+- `<line>` com atributos `x1, y1, x2, y2`
+- `<path>` com comandos: `M, m, L, l, H, h, V, v, A, a, Z, z, C, S, Q, T` (beziers aproximados por segmento endpoint-to-endpoint)
 
 ---
 
 ## 3. dieline_parser.js — Pipeline completa
 
-### Etapas sequenciais
+### Etapa 1: parseColoredLines
 
+Percorre filhos de `#root_group`, extrai segmentos por cor. Arcos `A` são aproximados em 8 segmentos lineares (`ARC_STEPS = 8`). Segmentos com comprimento < 1e-4 são ignorados.
+
+### Etapa 2: buildGraph — Snap adaptativo + T-junctions
+
+**Snap adaptativo:**
+```javascript
+SNAP = min(6, max(0.5, min(spanX, spanY) * 0.002))
 ```
-parseColoredLines → buildGraph → buildHalfEdges → findFaces
-    → filterFaces → assignKeys → buildFoldTree → TemplateMapper
-    → reorderPanelKeys
-```
+Pontos dentro deste raio são fundidos num único vértice (evita gaps de 1-2px entre linhas adjacentes do SVG).
 
-#### 3.1 parseColoredLines
+**Colapso de short-cuts:** Arestas vermelhas muito curtas (`< FOLD_CORNER_SNAP = min(20, SNAP*5)`) entre dois endpoints de vinco são colapsadas via union-find, mantendo colinearidade dos vincos.
 
-Percorre todos os filhos de `#root_group` e classifica os segmentos por cor:
-- `red[]` — segmentos de corte
-- `blue[]` — segmentos de vinco
+**Resolução de T-junctions:** Iteração até convergência (máx 10×): quando um vértice fica sobre o interior de uma aresta, essa aresta é partida em 2 segmentos.
 
-Suporta elementos `<line>` (directamente) e `<path>` (parser de comandos SVG: M, L, H, V, A, Z, C, S, Q, T — curvas cúbicas/quadráticas são aproximadas pelo seu ponto final).
+### Etapa 3: buildHalfEdges (DCEL)
 
-Arcos (`A`) são convertidos em segmentos lineares por `arcToSegments` com `ARC_STEPS=8` pontos.
+Por cada aresta `{a,b}` → duas meias-arestas opostas. O `next` de cada meia-aresta é calculado por **menor rotação à esquerda** (ângulo delta normalizado em [0, 2π)).
 
-#### 3.2 buildGraph
+### Etapa 4: findFaces
 
-Converte segmentos soltos num grafo de vértices + arestas.
+Segue ligações `next` a partir de cada meia-aresta não visitada → ciclos fechados de ≥ 3 vértices = uma face. Cada face recebe flag `hasFold = true` se alguma aresta da face é azul.
 
-**Snap adaptativo:** calcula `SNAP = min(6, max(0.5, min(spanX, spanY) * 0.002))` em função das dimensões do SVG. Dois pontos dentro deste raio são fundidos num único vértice.
-
-**Colapso de shorts fold:** arestas vermelhas muito curtas (`< FOLD_CORNER_SNAP = min(20, SNAP*5)`) entre dois pontos que são endpoints de vincos são colapsadas via union-find, mantendo a colinearidade dos vincos.
-
-**T-junctions (`resolveT`):** quando um vértice fica sobre o interior de uma aresta (dentro de `SNAP`), essa aresta é partida em dois segmentos. Iterado até convergência (máx. 10 iterações).
-
-#### 3.3 buildHalfEdges (DCEL)
-
-Constrói a estrutura de meias-arestas (Doubly Connected Edge List):
-- Por cada aresta `{a,b}` são criadas duas meias-arestas opostas.
-- `next`: a meia-aresta seguinte em sentido **anti-horário** em torno de cada face, calculada encontrando o ângulo de menor rotação à esquerda a partir da chegada.
-- `twin`: a meia-aresta oposta.
-
-#### 3.4 findFaces
-
-Segue as ligações `next` a partir de cada meia-aresta não visitada para extrair todas as faces (ciclos fechados de ≥ 3 vértices).
-
-#### 3.5 filterFaces
+### Etapa 5: filterFaces
 
 Remove:
-- **Face exterior** — a face de maior área (envolvente do diagrama inteiro).
-- **Slivers** — faces com área < `totalArea * SLIVER_RATIO` (0.0008).
-- **Fantasmas** — faces sem nenhuma aresta azul (`hasFold=false`) maiores que o maior painel real com vinco.
-- **Faces quasi-totais** — bounding box > 90% do SVG em largura E altura.
+- **Face exterior** (maior por área)
+- **Slivers** (área < `totalArea × 0.0008`)
+- **Fantasmas** (sem arestas azuis e área maior que o maior painel real)
+- **Quasi-totais** (bbox > 90% × 90% do SVG)
 
-#### 3.6 assignKeys
+### Etapa 6: assignKeys
 
-Ordena as faces remanescentes por **área decrescente** e atribui `panel_0`, `panel_1`, … , `panel_N`. Esta numeração é **temporária** — é renumerada no final em BFS order.
+Ordena faces por área decrescente → `panel_0`, `panel_1`, …, `panel_N` (**temporário** — estas keys mudam após reorderPanelKeys).
 
-#### 3.7 buildFoldTree
+### Etapa 7: buildFoldTree
 
-Constrói uma árvore de painéis por BFS, priorizando arestas de vinco (azuis) sobre arestas de corte.
+BFS a partir de `panels[0]` (maior painel), priorizando arestas de vinco (fold queue antes de cut queue). Cada nó recebe:
 
-Dois passes:
-1. Primeiro BFS: apenas arestas de vinco (`foldQueue`).
-2. Segundo BFS: arestas de corte para os painéis ainda não visitados (`cutQueue`).
-
-Painéis não alcançados são anexados ao root com `edge=null`.
-
-Cada nó da árvore tem:
-```js
+```javascript
 {
-  key: 'panel_3',           // temporário, renumerado depois
-  parentKey: 'panel_0',     // null no root
-  angle: 90,                // ângulo de dobra (graus)
-  points: [{x,y}, ...],     // polígono em coordenadas SVG (px)
-  edge: {x1,y1,x2,y2},      // aresta de dobra em coords SVG; null no root
-  isFoldEdge: true,          // true se a aresta partilhada era azul
+  key: 'panel_3',          // key temporária (área-ordem)
+  parentKey: 'panel_0',   // null no root
+  angle: 90,              // ângulo de dobra (sempre 90 nesta fase)
+  points: [{x,y}, ...],  // polígono em SVG-px
+  edge: {x1,y1,x2,y2},   // aresta de dobra; null no root
+  isFoldEdge: true,       // true = vinco azul, false = corte vermelho
+  foldSign: undefined,    // preenchido pelo TemplateMapper
+  animGroup: undefined,   // preenchido pelo TemplateMapper
 }
 ```
 
-O resultado `nodes._adj` contém o grafo de adjacência completo para uso pelos TemplateMappers.
+Painéis não alcançados no BFS são anexados por heurística de eixo partilhado ou como filhos do root.
 
-#### 3.8 TemplateMapper
+### Etapa 8: TemplateMapper
 
-Ver secção 4.
+Enriquece os nodes com `foldSign`, `animGroup`, e pode reorganizar `parentKey`/`edge`. Ver secção 4.
 
-#### 3.9 reorderPanelKeys
+### Etapa 9: reorderPanelKeys
 
-Após o TemplateMapper (que pode mudar `parentKey`), o root real é determinado:
-- `roots = nodes.filter(n => n.parentKey == null)`
-- Para caixas de 2 peças: prefere o root sem `_lidRoot=true` (a base).
-
-BFS a partir do root real → atribui `panel_0` ao root, `panel_1`, `panel_2`, … em ordem de descoberta.
-
-### Output do parser
-
-```js
-{
-  meta: { length, width, height, thickness, ... },  // da <metadata> do SVG
-  unit: number,           // px por mm (calculado a partir de meta.length e bbox do panel_0)
-  rootKey: 'panel_0',     // sempre panel_0 após reorder
-  type: 'FEFCO_0201',     // tipo passado a build() ou meta.box_type
-  nodes: [
-    {
-      key: 'panel_0',
-      id: 'panel_0',
-      parentKey: null,
-      angle: 90,
-      points: [{x,y}, ...],
-      edge: null,
-      isFoldEdge: false,
-      foldSign: -1,         // -1 ou 1; adicionado pelo TemplateMapper
-      animGroup: 0,         // inteiro ≥ 0; adicionado pelo TemplateMapper
-      // opcionais adicionados por alguns mappers:
-      _dvInverted: true,    // (FEFCO_0215 p0) inverte UV-v na textura
-      _isLid: true,         // (FEFCO_0330) marca painéis da tampa
-      _lidRoot: true,       // (FEFCO_0330) marca o root da tampa
-    },
-    ...
-  ]
-}
-```
+BFS a partir do root real (nó com `parentKey == null`). Para caixas de 2 peças prefere o root sem `_lidRoot = true` (a base). Renumera: `panel_0 = root`, `panel_1, panel_2, …` em ordem BFS. **Estas são as keys finais usadas pelo engine.**
 
 ---
 
-## 4. TemplateMapper — Como funciona e como adicionar uma nova caixa
+## 4. TemplateMappers — Todos os tipos existentes
 
-### Conceito
+### Conceito central
 
-O TemplateMapper é a única parte do sistema com conhecimento da topologia específica de cada tipo de caixa FEFCO. O engine 3D é completamente genérico; toda a semântica está aqui.
+O TemplateMapper é a **única parte com conhecimento de topologia FEFCO**. Recebe `nodes` (pós-buildFoldTree, keys por área) e pode:
 
-Cada mapper é uma função que recebe `nodes` (a lista de nós após `buildFoldTree`) e pode:
-1. **Modificar `foldSign`** — qual lado dobra para dentro (-1) ou para fora (+1).
-2. **Modificar `animGroup`** — em que fase da animação este painel dobra.
-3. **Modificar `parentKey` e `edge`** — reorganizar a árvore de dobras.
-4. **Adicionar flags privados** (`_dvInverted`, `_isLid`, etc.) — para uso no engine.
+1. Modificar `foldSign` — qual lado dobra para dentro (`-1`) ou fora (`+1`)
+2. Modificar `animGroup` — fase de animação (grupos maiores fecham depois)
+3. Modificar `parentKey` e `edge` — reorganizar a árvore de dobras
+4. Adicionar flags privados — `_dvInverted`, `_isLid`, `_lidRoot`, etc.
 
-Os mappers recebem `nodes._adj` (grafo de adjacência original) para navegar a topologia.
+**Atenção:** as keys usadas no mapper são as **pré-reorder** (por área), não as finais. O `reorderPanelKeys` corre depois.
 
-### Campos adicionados por cada mapper
+### Função auxiliar: defaultFoldSign
 
-| Campo | Tipo | Significado |
-|-------|------|-------------|
-| `foldSign` | -1 \| 1 | Direcção de dobra. **-1** = dobra "para fora" (padrão, a aba levanta-se do plano). **+1** = dobra "para dentro". |
-| `animGroup` | inteiro ≥ 0 | Grupos com valor menor animam primeiro. Painéis com o mesmo valor animam em paralelo. |
-
-### Como o engine usa estes campos
-
-**`foldSign`:** no engine, cada dobra roda o `foldGroup` em torno do eixo local û (ao longo da aresta). O ângulo final é `angle * foldSign * (π/180)`. Com `-1` o painel levanta-se para o exterior; com `+1` dobra para o interior.
-
-**`animGroup`:** `calcFoldWindows()` agrupa as dobras por `animGroup`, ordena por valor crescente e distribui janelas de tempo `[tStart, tEnd]` sem sobreposição dentro do intervalo `[0, 1]`. Dobras do grupo 0 ocupam os primeiros `1/N` do timeline, grupo 1 os seguintes, etc.
-
-### Função auxiliar `defaultFoldSign`
-
-Calcula o foldSign geometricamente: compara o centróide do nó com o centróide do pai em relação ao normal da aresta de dobra. Se estão do mesmo lado → `+1`; lados opostos → `-1`.
-
-```js
+```javascript
 function defaultFoldSign(node, parentNode) {
-    // normal à aresta de dobra (perpendicular no plano SVG)
+    // Normal à aresta de dobra no plano SVG
     var nx = -dy/len, ny = dx/len;
-    // dot product com vector nó→aresta e pai→aresta
+    // Se centróide do nó e do pai estão em lados opostos → -1 (dobra para dentro)
     return (nodeDir * parDir < 0) ? -1 : 1;
 }
 ```
 
-### Função auxiliar `_rscAnimGroups`
+### Função auxiliar: _rscAnimGroups
 
-Para caixas RSC (tubo retangular com abas em cima e em baixo), determina automaticamente quais painéis são paredes (animGroup=0) e quais são abas de topo/fundo (1 ou 2) pela posição Y do centróide em relação ao band Y das arestas horizontais.
-
-```js
-_rscAnimGroups(nodes, topFirst);
-// topFirst=true  → abas de topo=ag1, fundo=ag2
-// topFirst=false → fundo=ag1, topo=ag2
+Para caixas RSC (tubo + abas topo/fundo):
+```javascript
+_rscAnimGroups(nodes, topFirst)
+// Detecta "band Y" (vincos horizontais)
+// ag=0: centróide no band (paredes)
+// ag=1 ou 2: abas acima/abaixo (topFirst controla quem fecha primeiro)
 ```
+
+### Tabela resumo de todos os mappers
+
+| Tipo | Mapper | Estratégia base | AnimGroups | Notas especiais |
+|------|--------|----------------|------------|----------------|
+| `GENERIC` | `templateGeneric` | Depth BFS; isLid por área/fold | depth-based | Fallback universal |
+| `FEFCO_0200` | `templateFEFCO_0200` | `_rscAnimGroups(true)` | 0=paredes, 1=topo, 2=fundo | RSC standard |
+| `FEFCO_0201` | `templateFEFCO_0201` | Root = parede central; BFS completo | 0=raiz+paredes, 1=abas baixo, 2=abas cima | Root escolhido por grau+proximidade ao centro |
+| `FEFCO_0215` | `templateFEFCO_0215` | `_rscAnimGroups(false)` + swap root | 0=paredes, 1=fundo, 2=topo, 3=tampa | `_dvInverted=true` na tampa; UV-v invertido |
+| `FEFCO_0216` | `templateFEFCO_0216` | `_rscAnimGroups(false)` | 0=paredes, 1=fundo, 2=topo | RSC invertido |
+| `FEFCO_0330` | `templateFEFCO_0330` | 2 componentes conexos; rewireGroup fold-first | 0=roots, 1=abas folha, 2=lados, 3=resto | Base+Tampa; `_lidRoot=true`, `_isLid=true` |
+| `FEFCO_0422` | `templateFEFCO_0422` | BFS default + fullSharedEdge | 0=caixa, 1=abas | Remove painéis < 3% rootArea; corrige janela |
+| `FEFCO_0425` | `templateFEFCO_0425` | Ajuste geométrico + animMap fixo | 0=corpo, 1=lados, 2=abas ext | panel_5/6 geometria forçada |
+| `FEFCO_0426` | `templateFEFCO_0426` | `_foldTreeByConnectivity` | depth-based | Crash-lock (fundo automático) |
+| `FEFCO_0427` | `templateFEFCO_0427` | animMap fixo + edges manuais | 0=corpo, 1=abas lat, 2=abas ext, 3=tampas | Keys pré-reorder fixas no animMap |
+| `FEFCO_0473` | `templateFEFCO_0473` | `_foldTreeByConnectivity` | depth-based | Fita biadesiva; fold diagonal |
+| `FEFCO_04XX` | `templateFEFCO_04XX` | `templateGeneric` | depth-based | Família 04 genérica |
 
 ---
 
-### Guia: adicionar suporte a um novo tipo de caixa
+## 5. Guia: Criar uma nova caixa (passo a passo)
 
-#### Passo 1 — Criar a função mapper
+### Pré-requisitos
 
-```js
-function templateFEFCO_XXXX(nodes) {
+- SVG em Format B com `<metadata>` contendo `box_type: "FEFCO_XXXX"`
+- Conhecimento da topologia: quais painéis dobram primeiro, em que ordem, para que lado
+
+### Passo 1 — Definir o tipo no Odoo
+
+Em `product.template`, o campo `box_type` aceita os tipos mapeados. Se estás a criar `FEFCO_0999`, basta adicionar a string ao campo (sem alterações ao Python — o parser usa a string directamente).
+
+### Passo 2 — Criar o SVG Format B
+
+O SVG deve ter:
+- `<g id="root_group">` com linhas coloridas
+- `<metadata>` com `{"box_type":"FEFCO_0999","length":L,"width":W,"height":H}`
+- Vincos (azul) em **todos** os locais de dobra
+- Cortes (vermelho) no contorno e nas separações entre painéis
+
+**Dica:** verifica o SVG no browser carregando a página do configurador com um produto de teste. O parser vai extrair as faces e podes ver no console o que foi detectado.
+
+### Passo 3 — Perceber a ordem de keys pré-reorder
+
+Abre a consola do browser e adiciona temporariamente ao início de `applyTemplateMapper`:
+
+```javascript
+function applyTemplateMapper(nodes, type) {
+    console.table(nodes.map(function(n){
+        return { key: n.key, parent: n.parentKey, area: Math.round(polyArea(n.points)) };
+    }));
+    // ... resto do código
+```
+
+Isto mostra os painéis **ordenados por área decrescente** (keys pré-reorder). Anota qual `panel_N` corresponde a cada peça física (parede frontal, lateral, aba topo, etc.).
+
+### Passo 4 — Criar o TemplateMapper
+
+Adiciona a função em `dieline_parser.js` antes do dispatcher `TEMPLATE_MAPPERS`:
+
+```javascript
+/* ── TemplateMapper FEFCO_0999 ─────────────────────────────── */
+function templateFEFCO_0999(nodes) {
     var nodeByKey = {};
     nodes.forEach(function(n) { nodeByKey[n.key] = n; });
-    var adj = nodes._adj || {};  // grafo de adjacência
 
-    // 1. Definir foldSign para todos
+    // PASSO A: Definir foldSign para todos os painéis
+    // -1 = dobra para dentro (standard); +1 = dobra para fora
     nodes.forEach(function(n) { n.foldSign = -1; });
 
-    // 2. Definir animGroup para todos
-    //    animGroup=0 → primeira fase (paredes principais)
-    //    animGroup=1 → segunda fase (abas laterais)
-    //    animGroup=2 → terceira fase (tampa/fundo)
+    // PASSO B: Correcções pontuais de foldSign
+    // (quando um painel específico dobra ao contrário do defaultFoldSign)
+    var tampa = nodeByKey['panel_1'];  // exemplo: panel_1 é a tampa
+    if (tampa) tampa.foldSign = 1;
+
+    // PASSO C: Definir animGroups
+    // ag=0 → fecha primeiro (ou simultaneamente com outros ag=0)
+    // ag=1 → fecha depois de ag=0
+    // ag=2 → fecha depois de ag=1
+    // etc.
     var animMap = {
-        'panel_0': 0,  // root (parede principal)
-        'panel_1': 0,  // parede oposta
-        'panel_2': 0,  // parede lateral
-        'panel_3': 0,  // parede lateral oposta
-        'panel_4': 1,  // aba de fundo
-        'panel_5': 1,  // aba de fundo
-        'panel_6': 2,  // aba de tampa
-        'panel_7': 2,  // aba de tampa
+        'panel_0': 0,   // parede principal (root)
+        'panel_2': 0,   // parede oposta
+        'panel_4': 0,   // parede lateral
+        'panel_6': 0,   // parede lateral oposta
+        'panel_1': 1,   // abas fundo
+        'panel_3': 1,
+        'panel_5': 2,   // abas topo (fecham por último)
+        'panel_7': 2,
     };
     nodes.forEach(function(n) {
         n.animGroup = animMap[n.key] !== undefined ? animMap[n.key] : 0;
     });
 
-    // 3. Ajustes de parentKey/edge se necessário
-    // (apenas se a árvore do buildFoldTree não for correcta)
+    // PASSO D (opcional): Reorganizar árvore de dobras
+    // Útil quando o BFS escolheu um root errado ou parentKeys errados
+    // Exemplo: forçar panel_3 a ser filho de panel_0 em vez de panel_2
+    var p3 = nodeByKey['panel_3'];
+    if (p3) {
+        p3.parentKey = 'panel_0';
+        // recalcular edge (aresta partilhada entre panel_3 e panel_0)
+        p3.edge = sharedEdgeBetween(p3, nodeByKey['panel_0']); // ver abaixo
+    }
 }
 ```
 
-#### Passo 2 — Registar no dispatcher
+### Passo 5 — Registar no dispatcher
 
-```js
+```javascript
 var TEMPLATE_MAPPERS = {
-    // ... mappers existentes ...
-    'FEFCO_XXXX': templateFEFCO_XXXX,
+    // ... existentes ...
+    'FEFCO_0999': templateFEFCO_0999,  // ← adicionar aqui
 };
 ```
 
-#### Passo 3 — Configurar o produto no Odoo
+### Passo 6 — Testar iterativamente
 
-No produto, definir `box_type = 'FEFCO_XXXX'`. O parser lê este valor e invoca o mapper correcto.
+**Ciclo de debug recomendado:**
 
-#### Passo 4 — Descobrir as keys dos painéis
+1. Carrega a caixa no browser
+2. Abre a consola, procura erros
+3. Usa o slider de animação para ver como dobra
+4. Ajusta `animGroup` se a ordem estiver errada
+5. Ajusta `foldSign` se um painel dobrar no sentido errado
+6. Se um painel aparece no sítio errado (planificado ou montado), pode ser o `parentKey` ou `edge` errado
 
-A chave dos painéis (`panel_0`, `panel_1`, …) depende da ordem de área **antes** do reorder. A forma mais rápida de os mapear:
+**Verificar foldSign visualmente:**
+- `foldSign = -1` → painel fecha para o interior da caixa ✓
+- `foldSign = +1` → painel abre para o exterior (correcto para tampas roll-over, etc.)
 
-1. Usar o mapper `GENERIC` temporariamente.
-2. No browser, abrir a consola e inspecionar `window._lastGeo.nodes.map(n => ({key:n.key, area: Math.round(polyArea(n.points)), parent: n.parentKey}))`.
-3. Os labels amarelos sobrepostos no 3D mostram o número de cada painel.
+### Passo 7 — Casos especiais
 
-Após o reorder, `panel_0` é sempre o root BFS. As keys no `animMap` devem corresponder às keys **antes do reorder** (porque o mapper corre antes do reorder). Para descobri-las, é necessário desativar o reorder temporariamente ou ler `nodes` logo após `buildFoldTree`.
+#### Caixa com 2 peças separadas (base + tampa)
 
-**Nota importante:** o `animMap` no `templateFEFCO_0427` usa as keys **pré-reorder** (ordem por área). O reorder acontece depois, mas os `animGroup` e `foldSign` ficam associados aos nós por referência e são preservados.
+Ver `templateFEFCO_0330` como referência. Pontos-chave:
+- O SVG deve conter as 2 peças lado a lado (B2BA format)
+- O mapper divide por `midX` em 2 componentes conexos
+- A peça maior = tampa (lid); a peça menor = base
+- A tampa recebe `_lidRoot = true` e `_isLid = true` em todos os seus nós
+- O engine cria `lidGroup` separado e anima o encaixe (INSERT_START = 0.6)
 
-#### Exemplos de padrões comuns
+#### Root errado (parede com mais vincos é tomada como root)
 
-**Caixa RSC simples (4 paredes + abas):**
-```js
-function templateFEFCO_MINHA_CAIXA(nodes) {
-    _rscAnimGroups(nodes, true); // topo fecha primeiro
+```javascript
+// Refazer BFS a partir do root correcto
+var newRoot = nodeByKey['panel_X']; // painel que deve ser root
+var seen = {}, queue = [newRoot.key], adj = nodes._adj || {};
+seen[newRoot.key] = true;
+newRoot.parentKey = null; newRoot.edge = null;
+while (queue.length) {
+    var cur = queue.shift();
+    (adj[cur] || []).forEach(function(link) {
+        if (seen[link.otherKey]) return;
+        seen[link.otherKey] = true;
+        var child = nodeByKey[link.otherKey];
+        if (child) { child.parentKey = cur; child.edge = link.edge; }
+        queue.push(link.otherKey);
+    });
 }
 ```
 
-**Caixa com topologia de fold não óbvia:**
-```js
-function templateFEFCO_MINHA_CAIXA(nodes) {
-    _foldTreeByConnectivity(nodes); // reconstrói árvore pelo grau de fold
-}
-```
+#### Calcular aresta partilhada entre dois painéis
 
-**Caixa com painel que dobra no sentido errado:**
-```js
-function templateFEFCO_MINHA_CAIXA(nodes) {
-    templateGeneric(nodes); // base
-    var nodeByKey = {};
-    nodes.forEach(function(n) { nodeByKey[n.key] = n; });
-    // corrigir só o painel que dobra ao contrário
-    if (nodeByKey['panel_3']) nodeByKey['panel_3'].foldSign = 1;
-}
-```
-
-**Caixa com aba que deve dobrar como filha de outra aba (não do root):**
-```js
-// Mover panel_5 para ser filho de panel_2 em vez do root
-var p5 = nodeByKey['panel_5'], p2 = nodeByKey['panel_2'];
-if (p5 && p2) {
-    p5.parentKey = 'panel_2';
-    p5.edge = sharedEdge(p5, p2); // calcular aresta partilhada
-}
-```
-
-#### Função utilitária: calcular aresta partilhada entre dois painéis
-
-Vários mappers incluem versões locais desta função. A lógica é a mesma em todos:
-
-```js
-function sharedEdge(nA, nB) {
+```javascript
+function sharedEdgeBetween(nA, nB) {
     var ptsA = nA.points, ptsB = nB.points, EPS = 4, bestLen = 0, bestEdge = null;
     for (var i = 0; i < ptsA.length; i++) {
         var a1 = ptsA[i], a2 = ptsA[(i+1) % ptsA.length];
-        var dx = a2.x - a1.x, dy = a2.y - a1.y, segLen = Math.hypot(dx, dy) || 1;
-        // verificar se pontos de ptsB estão sobre este segmento
-        var tsB = ptsB.map(function(p) {
-            var d = Math.abs((p.x-a1.x)*dy - (p.y-a1.y)*dx) / segLen;
-            if (d > EPS) return null;
-            return ((p.x-a1.x)*dx + (p.y-a1.y)*dy) / (segLen*segLen);
-        }).filter(function(t) { return t !== null; });
-        if (!tsB.length) continue;
-        // sobreposição entre [0,1] e [min(tsB), max(tsB)]
-        var oMin = Math.max(0, Math.min.apply(null, tsB));
-        var oMax = Math.min(1, Math.max.apply(null, tsB));
-        var ov = (oMax - oMin) * segLen;
-        if (ov > EPS && ov > bestLen) {
-            bestLen = ov;
-            var ux = dx/segLen, uy = dy/segLen;
-            var p1 = {x: a1.x + ux*oMin*segLen, y: a1.y + uy*oMin*segLen};
-            var p2 = {x: a1.x + ux*oMax*segLen, y: a1.y + uy*oMax*segLen};
-            bestEdge = {x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y};
+        var dx = a2.x-a1.x, dy = a2.y-a1.y, segLen = hypot(dx,dy) || 1;
+        for (var j = 0; j < ptsB.length; j++) {
+            var b1 = ptsB[j], b2 = ptsB[(j+1) % ptsB.length];
+            if (Math.abs((b1.x-a1.x)*dy-(b1.y-a1.y)*dx)/segLen > EPS) continue;
+            if (Math.abs((b2.x-a1.x)*dy-(b2.y-a1.y)*dx)/segLen > EPS) continue;
+            var t1 = ((b1.x-a1.x)*dx+(b1.y-a1.y)*dy)/(segLen*segLen);
+            var t2 = ((b2.x-a1.x)*dx+(b2.y-a1.y)*dy)/(segLen*segLen);
+            var ov = (Math.min(Math.max(t1,t2),1) - Math.max(Math.min(t1,t2),0)) * segLen;
+            if (ov > EPS && ov > bestLen) {
+                bestLen = ov;
+                bestEdge = { x1: a1.x, y1: a1.y, x2: a2.x, y2: a2.y };
+            }
         }
     }
     return bestEdge;
 }
 ```
 
-A aresta devolvida é orientada pelo polígono A. A orientação importa para o `foldSign` geométrico (o normal da aresta aponta de A para B ou o contrário).
+#### animGroup com keys pré-reorder (FEFCO_0427 pattern)
+
+Quando usas um `animMap` fixo com keys pré-reorder (`panel_0` = maior painel por área), as keys no map referem-se à **ordem por área** — não à ordem BFS final. Isto é intencional e correcto porque o mapper corre antes do reorder.
+
+#### Painel com UV invertido (FEFCO_0215 pattern)
+
+Se a textura do logo aparecer espelhada num painel específico:
+```javascript
+node._dvInverted = true;
+// O engine inverte o eixo V da textura para este painel
+```
+
+### Passo 8 — Adicionar ao CLAUDE.md (memoria do projecto)
+
+Documenta a decisão no ficheiro CLAUDE.md ou nas memórias para referência futura.
 
 ---
 
-### Tabela de mappers existentes
+## 6. dieline_engine.js — Motor 3D
 
-| Mapper | Tipo de caixa | Estratégia |
-|--------|-------------|-----------|
-| `templateGeneric` | Genérico | Depth na árvore BFS; isLid por área/foldEdge |
-| `templateFEFCO_0200` | RSC standard | `_rscAnimGroups(true)` |
-| `templateFEFCO_0201` | RSC com abas cola | Root = parede central; abas por posição Y |
-| `templateFEFCO_0215` | Caixa com tampa deslizante | RSC + p0 torna filho de p2; `_dvInverted=true` |
-| `templateFEFCO_0216` | RSC invertido | `_rscAnimGroups(false)` |
-| `templateFEFCO_0330` | Base + tampa separadas (B2BA) | Divide SVG em 2 componentes por midX; BFS por grupo |
-| `templateFEFCO_0422` | Caixa com janela | BFS default + animMap fixo |
-| `templateFEFCO_0425` | Caixa complexa multi-aba | animMap fixo + correções de edge |
-| `templateFEFCO_0426` | Crash-lock | `_foldTreeByConnectivity` |
-| `templateFEFCO_0427` | Caixa com inserção | animMap fixo pré-reorder |
-| `templateFEFCO_0473` | Fita biadesiva | `_foldTreeByConnectivity` |
-| `templateFEFCO_04XX` | Família 04 genérica | `templateGeneric` |
-
----
-
-## 5. dieline_engine.js — Motor 3D
-
-### Arquitectura de cena Three.js
+### Hierarquia de grupos Three.js
 
 ```
 scene
-└── boxPivot          ← recebe a quaternion de rotação do utilizador
-    ├── baseSpin      ← roda a BASE 90° sobre si própria (animação insert FEFCO_0330)
-    │   └── boxGroup  ← -90° em X (levanta o dieline do chão para vertical)
-    │       ├── [mesh root]
-    │       └── [pivot + foldGroup por cada painel filho]
-    └── lidGroup      ← só existe em caixas de 2 peças; mesma rotação que boxGroup
-        └── [mesh lidRoot + painéis da tampa]
+└── boxPivot                ← recebe quaternion de rotação do utilizador
+    ├── baseSpin            ← roda a BASE durante insert (FEFCO_0330)
+    │   └── boxGroup        ← rotation.x = -π/2 (levanta para vertical)
+    │       ├── [meshes do root]
+    │       ├── pivot_N     ← um por filho directo do root
+    │       │   └── foldGroup_N
+    │       │       ├── meshGroup  (outer + inner + edge faces)
+    │       │       └── pivot_N_M  ← netos (filhos de filhos)
+    │       │           └── foldGroup_N_M
+    │       └── axesHelper  ← eixos LWH (excepto 0330: vai para boxPivot)
+    └── lidGroup            ← FEFCO_0330 only; mesmo rotation.x que boxGroup
+        └── [meshes da tampa]
 ```
 
 ### Mapeamento de coordenadas
 
-**SVG → Cena (estado planificado):**
+**Estado planificado (t=0) — dieline deitado no plano XZ:**
 ```
-SVG (x, y)  →  Three.js (X = mm(x - off.x),  Y = 0,  Z = mm(y - off.y))
+SVG (x, y)  →  Scene (X = mm(x - off.x),  Y = 0,  Z = mm(y - off.y))
 ```
-O dieline assenta no plano XZ (chão). `off` é o canto superior esquerdo do bounding box do root.
 
-**Estado planificado → montado:**
-`boxGroup.rotation.x = -π/2` levanta a caixa para a vertical. O `boxGroup.position` é ajustado para que o centro geométrico coincida com a origem.
+Onde `off = {x: rb.minX, y: rb.minY}` do `geo.nodes[0]` (pré-reorder, maior painel).
+
+**Centramento em world(0,0,0):**
+```javascript
+var actualRoot = geo.nodes.filter(n => n.parentKey == null)[0];
+var ab = polyBBox(actualRoot.points);
+var p0cx = mm((ab.minX + ab.maxX) / 2 - off.x);
+var p0cy = mm((ab.minY + ab.maxY) / 2 - off.y);
+boxGroup.position.set(-p0cx, -p0cy, 0);
+```
+O centro do painel p0 (root) fica em world (0,0,0).
+
+**Eixos no canto BL de p0:**
+```javascript
+axesHelper.position.set(mm(ab.minX - off.x), 0, mm(ab.maxY - off.y));
+```
 
 ### Sistema local de cada painel (buildChild)
 
-Cada painel filho tem um sistema de coordenadas locais definido pela sua aresta de dobra:
+Cada painel filho tem um sistema de coordenadas definido pela aresta de dobra:
 - **û** — direcção ao longo da aresta (normalizado)
-- **n̂** — perpendicular a û no plano SVG, apontando para o centróide do painel
-- **ẑ** = û × n̂ — normal da face
+- **n̂** — perpendicular a û no plano XZ, apontando para o interior do painel
+- Matriz `restWorld` transforma coords locais → coords de cena no estado planificado
 
-A matriz `restWorld` do painel transforma coords locais `(s, d, 0)` para coords de cena no estado planificado (deitado).
+O pivot de cada filho é posicionado usando `localM = inv(parentRest) · childRest` — rigoroso a qualquer profundidade.
 
-O pivot de dobra é posicionado em `A` (extremo da aresta) com orientação dada por `localM = inv(parentRest) · childRest`. O `foldGroup` interno roda em torno de `X local = û`, produzindo a dobra.
+### Meshes: face pairs + edge
 
-### Animação por fases
+Por cada painel:
+1. `_outer` mesh (FrontSide): face exterior, z = +matThickness/2
+2. `_inner` mesh (BackSide): face interior, z = -matThickness/2
+3. `_edge` mesh (DoubleSide): borda lateral decorativa
 
-```
-t = 0.0  →  planificado (todos os ângulos a 0°)
-t = 1.0  →  montado     (cada painel ao seu angle * foldSign)
-```
+Registados em `meshMap` como `'panel_N_outer'`, `'panel_N_inner'`.
 
-`calcFoldWindows()` distribui janelas `[tStart, tEnd]` em `[0, 1]` pelo `animGroup`:
-- Grupo 0 → `[0, 1/N]`
-- Grupo 1 → `[1/N, 2/N]`
-- etc.
+**Flaps** (abas de cola): `polygonOffset` ligeiramente atrás das paredes para evitar z-fighting quando a caixa está montada.
 
-Dentro de cada janela, a interpolação usa `ease(t) = t < 0.5 ? 2t² : -1 + (4-2t)t` (suavização quadrática).
+**Face flip**: se `zHat.y < 0`, a meshGroup inverte Z para corrigir qual face fica exterior.
 
-**Caixas de 2 peças (FEFCO_0330):** a timeline é dividida em duas fases:
-- `t ∈ [0, INSERT_START=0.6]` → dobras normais (remapeadas para `[0,1]`)
-- `t ∈ [0.6, 1]` → animação de encaixe: base roda 90°, tampa desce
+### Eixos LWH
 
-### Espessura do material
+Três setas coloridas a partir do canto BL de p0:
+- **Vermelho** → L (comprimento, +X)
+- **Azul** → W (largura, +Y local = profundidade)
+- **Verde** → H (altura, -Z local = para cima no mundo)
 
-Cada painel tem duas faces (`_outer` e `_inner`) afastadas `matThickness/2` em Z local, mais um mesh de borda lateral. `matThickness` é lido de `geo.meta.thickness` (mm) ou usa o default de 2 mm.
-
-### Z-fighting (polygonOffset)
-
-Abas coplanares (ex: flaps que se encontram ao meio da tampa) usariam o mesmo plano depth. `applyPolyOffset(opts, order)` aplica `polygonOffsetUnits = -(order+1)*0.05` por nó, garantindo uma ordem determinística sem deslocar geometria visivelmente.
-
-Flaps (painéis cujo key termina em `_flap` ou começa por `roll`) recebem `polygonOffsetFactor=1, Units=4` (offset positivo = empurrados para trás) para não aparecerem sobre as paredes quando fechados.
-
-### API pública (`window.ATP_DIELINE`)
-
-```js
-ATP_DIELINE.getGeo()                              // retorna o geo activo
-ATP_DIELINE.getMeshMap()                          // { 'panel_0_outer': Mesh, ... }
-ATP_DIELINE.applyLogoTexture(panelKey, side, canvas2d)  // aplica canvas como textura
-ATP_DIELINE.rebuild(svgText, type)               // re-parseia e reconstrói
-ATP_DIELINE.animateTo(t)                         // move animação para t ∈ [0,1]
-```
+Para FEFCO_0330: `axesHelper` vai para `boxPivot` (com `rotation.copy(boxGroup.rotation)`) para não rodar quando a base anima o insert.
 
 ---
 
-## 6. dieline_logo2d.js — Compositor de logos
+## 7. Sistema de animação de dobras
 
-### Estado
+### calcFoldWindows
 
-```js
+Distribui os `animGroup` em janelas de tempo [0, 1] sem sobreposição:
+
+```
+numRanks = número de grupos distintos (0, 1, 2, …)
+Cada grupo ocupa 1/numRanks do intervalo total
+grupo 0 → [0,        1/N]
+grupo 1 → [1/N,      2/N]
+grupo 2 → [2/N,      3/N]
+...
+```
+
+### animateTo(t)
+
+Para cada dobra, calcula `tLocal` dentro da janela do seu `animGroup`:
+
+```javascript
+tLocal = (t - tStart) / (tEnd - tStart)   // [0, 1]
+k = ease(tLocal)                            // suavização
+rotation.x = k * angle * foldSign
+```
+
+**Ease function:**
+```javascript
+ease(t) = t < 0.5 ? 2*t² : -1 + (4-2*t)*t
+```
+
+### Campos que controlam a animação
+
+| Campo | Tipo | Efeito |
+|-------|------|--------|
+| `animGroup` | number | Fase de animação (0 = primeiro) |
+| `foldSign` | -1 ou 1 | Sentido da dobra |
+| `angle` | number | Ângulo máximo de dobra (default: 90°) |
+| `isFoldEdge` | bool | Se false, é aba de corte (comportamento ligeiramente diferente) |
+
+### Insert animation (FEFCO_0330 only)
+
+Timeline combinada com `INSERT_START = 0.6`:
+- `t ∈ [0, 0.6]` → dobras normais (remapeadas para [0,1])
+- `t ∈ [0.6, 1]` → encaixe base+tampa (base roda, depois lid fecha)
+
+---
+
+## 8. dieline_logo2d.js — Compositor de logos
+
+### Estado de logos
+
+```javascript
 logos = {
-    front: [   // logos na face exterior
+    front: [  // face exterior (outer)
         {
             panelKey: 'panel_0',
-            side: 'outer',
-            s: 55.2,       // centro horizontal em mm no espaço local do painel
-            d: 40.1,       // centro vertical em mm no espaço local do painel
-            sizeMM: 80,    // largura do logo em mm
-            rot: 0,        // rotação em graus
-            dataUrl: '...', // imagem original
-            img: HTMLImageElement,
+            side: 'outer',      // 'outer' ou 'inner'
+            s: 55.2,            // coord local ao longo da aresta (mm)
+            d: 40.1,            // coord local perpendicular (mm)
+            sizeMM: 80,         // largura do logo em mm
+            rot: 0,             // rotação em graus
+            dataUrl: '...',     // imagem PNG/JPG base64
+            img: HTMLImageElement
         }
     ],
-    back: [...] // logos na face interior
+    back: []
 }
 ```
 
 ### Coordenadas locais do painel (s, d)
 
-O sistema de coordenadas local de cada painel é definido pelo engine:
-- `s` → ao longo da aresta de dobra (û)
-- `d` → perpendicular à aresta, para o interior do painel (n̂)
+- **s** — ao longo da aresta de dobra (û)
+- **d** — perpendicular, para o interior do painel (n̂)
 - Origem: extremo A da aresta de dobra
 
-Para o root (sem aresta), `s = mm(x - off.x)`, `d = mm(y - off.y)`.
+### Múltiplos logos por face
 
-A conversão é feita via `node._svgToLocal(p)` e `node._localToSvg(s, d)` calculadas pelo engine e expostas no geo.
+`placePanelCenter(node)` faz `.push()` — permite N logos por face.
 
-### Sincronização 2D ↔ 3D
-
-1. Logo posicionado/arrastado no canvas 2D.
-2. `applyLogoTexture(panelKey, side, canvas2d)` chamado.
-3. Engine cria `CanvasTexture` e aplica ao mesh `panel_N_outer` ou `panel_N_inner`.
-4. UV do mesh é normalizado pelo bounding box local do painel (normaliseFaceUVs).
-
-### Formato de exportação (artwork_json)
-
+Exportação via `exportLogoState()`:
 ```json
 {
-  "__logo__":      { "panelKey": "panel_0", "side": "outer", "s": 55, "d": 40, "sizeMM": 80, "rot": 0, "dataUrl": "..." },
-  "__logo__1":     { "panelKey": "panel_2", "side": "outer", "s": 30, "d": 25, "sizeMM": 60, "rot": 0, "dataUrl": "..." },
-  "__logo_back__": { "panelKey": "panel_0", "side": "inner", "s": 55, "d": 40, "sizeMM": 80, "rot": 0, "dataUrl": "..." }
+  "__logo__":    { "panelKey": "panel_0", "s": 55, "d": 40, ... },
+  "__logo__1":   { "panelKey": "panel_0", "s": 90, "d": 40, ... },
+  "__logo_back__": { "panelKey": "panel_0", "s": 55, "d": 40, ... }
 }
 ```
 
-- Índice 0: chave sem sufixo (`__logo__`, `__logo_back__`)
-- Índices > 0: sufixo numérico (`__logo__1`, `__logo__2`, …)
+### Sincronização 2D ↔ 3D
+
+1. Logo posicionado/arrastado no canvas 2D
+2. `applyLogoTexture(panelKey, side, canvas2d)` chamado pelo engine
+3. `CanvasTexture` criada a partir do canvas 2D
+4. Aplicada ao mesh `panel_N_outer` ou `panel_N_inner`
+5. UVs normalizados pelo bounding box local do painel
+
+### Trim automático de imagem
+
+- **PNG/SVG com alpha:** corta pixels com `alpha ≤ 10`
+- **JPEG/opaco:** detecta cor dos 4 cantos como fundo (tolerância dist² < 400)
 
 ---
 
-## 7. Integração backend Odoo
+## 9. dieline_generators.js — SVGs paramétricos
 
-### `_scale_dieline_svg(svg, L0, W0, H0, L, W, H)`
+### RSC (Regular Slotted Container)
 
-Escala o SVG das dimensões originais `(L0, W0, H0)` para novas dimensões `(L, W, H)`. Aplica transformações afins separadas para X e Y dependendo da direcção de cada segmento. Actualiza também o texto das cotas verdes.
+```javascript
+rsc(L, W, H)
+// Gera: glue | front | right | back | left
+// Cada parede com abas topo e fundo (altura = W/2)
+// box_type: "FEFCO_0216"
+```
 
-### `_inject_logos_into_svg(svg, artwork, prod, rec)`
+### Rollover Hinged Lid
 
-Para download do SVG com logos:
-1. Lê o artwork_json da encomenda.
-2. Para cada logo, converte `(s, d, sizeMM)` para coordenadas SVG usando a inversa do sistema local do painel.
-3. Injeta `<image>` no SVG na posição correcta com rotação.
-4. Injeta `<line>` e `<text>` de cotas (distâncias do logo ao bordo do painel em mm).
+```javascript
+rolloverHingedLid(L, W, H)
+// Gera: glue | front | base | back | lid | rollover
+// Lid com canto arredondado (r = H*0.2)
+// box_type: "FEFCO_0215"
+```
 
-### Modelo `sale.order.dieline`
-
-Campos relevantes para a pipeline:
-- `artwork_json` — JSON com todos os logos (frente + verso)
-- `svg_data` — SVG escalado nas dimensões da encomenda
-- `box_type` — tipo FEFCO para re-parsear se necessário
+Ambos os generators produzem SVG Format B completo com `<metadata>` e `<g id="root_group">`.
 
 ---
 
-## 8. Fluxo completo de dados
+## 10. Backend Odoo — Modelos e rotas
+
+### Modelos principais
+
+#### `product.template` (extended)
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `box_type` | Char | Tipo FEFCO (FEFCO_0201, 0216, etc.) |
+| `box_l`, `box_w`, `box_h` | Float | Dimensões em mm |
+| `box_dieline_svg` | Text | SVG base64 (Format B) |
+| `box_artwork` | Text | JSON com logos configurados |
+| `card_image_normal`, `card_image_hover` | Binary | Imagens para card de produto |
+
+#### `sale.order.dieline`
+
+Snapshot da configuração no momento da encomenda:
+- Ligado a `sale.order.line` (cascade delete)
+- Campos: dimensões, tipo, SVG escalado, `artwork_json`
+
+#### `atp.partner.logo`
+
+Galeria pessoal de logos por cliente:
+- Campos: `partner_id`, `name`, `image`, `mimetype`
+
+### Rotas HTTP
+
+| Rota | Método | Função |
+|------|--------|--------|
+| `/dieline` | GET | Configurador 3D (template principal) |
+| `/dieline/svg/<product_id>` | GET | Serve SVG do produto (com scaling L/W/H) |
+| `/dieline/artwork/save` | POST JSON | Guarda artwork no produto |
+| `/dieline/artwork/load` | GET | Carrega artwork do produto |
+| `/dieline/order/save` | POST JSON | Cria/actualiza `sale.order.dieline` |
+| `/dieline/order/preview/<id>` | GET | Preview read-only |
+| `/dieline/order/<id>/svg/<side>` | GET | SVG com logos injectados (front/back) |
+| `/dieline/logo/upload` | POST JSON | Upload logo para galeria |
+| `/dieline/logo/list` | POST JSON | Lista logos do utilizador |
+| `/dieline/logo/delete` | POST JSON | Remove logo da galeria |
+
+### Funções auxiliares
+
+**`_scale_dieline_svg(svg, L0, W0, H0, L, W, H)`**
+Escala SVG de dimensões originais para novas, actualizando texto de cotas verdes.
+
+**`_inject_logos_into_svg(svg, artwork, prod, rec)`**
+Para cada logo em `artwork_json`: converte `(s, d, sizeMM)` → coords SVG, injeta `<image>` + linhas `<line>` + `<text>` de cotas em mm.
+
+---
+
+## 11. APIs públicas
+
+### `window.ATP_DIELINE`
+
+```javascript
+ATP_DIELINE.getGeo()                              // geo activo { meta, unit, rootKey, type, nodes[] }
+ATP_DIELINE.getMeshMap()                          // { 'panel_0_outer': Mesh, ... }
+ATP_DIELINE.applyLogoTexture(panelKey, side, canvas2d)  // aplica textura
+ATP_DIELINE.clearLogoTexture(panelKey)            // remove textura, restaura cor kraft
+ATP_DIELINE.rebuild(L, W, H)                      // re-parseia SVG com novas dimensões
+ATP_DIELINE.animateTo(t)                          // t ∈ [0, 1]
+ATP_DIELINE.setView(v)                            // '3d', '2d', 'logo2d'
+```
+
+### `window.ATP_LOGO2D`
+
+```javascript
+ATP_LOGO2D.onGeoReady(geo, svgText)               // chamado pelo engine após rebuild
+ATP_LOGO2D.placeImage(dataUrl, initialRot)        // coloca logo no panel_0
+ATP_LOGO2D.placePanelCenter(node)                 // coloca logo centrado num painel
+ATP_LOGO2D.removeSelected()                       // remove logo seleccionado
+ATP_LOGO2D.exportLogoState()                      // retorna artwork_json indexado
+ATP_LOGO2D.rotateLogo(deltaDeg)                   // roda logo seleccionado
+ATP_LOGO2D.scaleSelected(deltaMM)                 // altera sizeMM do logo seleccionado
+```
+
+### `window.ATP_CONFIG` (injectado pelo template Odoo)
+
+```javascript
+{
+  dielineSvgUrl: '/dieline/svg/42',
+  boxType: 'FEFCO_0201',
+  artwork: { __logo__: { ... } },
+  L: 200, W: 150, H: 100,
+  productId: 42,
+  readonlyMode: false
+}
+```
+
+---
+
+## 12. Fluxo completo de dados
 
 ```
 1. Browser carrega /dieline?product_id=X
-   └── template Odoo injeta: ATP_CONFIG = { dielineSvgUrl, boxType, artwork, L, W, H }
+   └─ template Odoo injeta ATP_CONFIG
 
-2. dieline_engine.js inicializa Three.js
-   └── fetcha SVG via ATP_CONFIG.dielineSvgUrl
+2. initThree() → Three.js scene + renderer
 
-3. DielineParser.parse(url, type)
-   └── build(svgText, type) → geo
+3. fetch(ATP_CONFIG.dielineSvgUrl)
+   └─ DielineParser.build(svgText, boxType)
+      └─ Pipeline DCEL (etapas 1–9)
+      └─ retorna geo
 
-4. buildFromGeometry(geo) → constrói cena Three.js
-   └── calcFoldWindows() → janelas de animação
-   └── updateFolds(0) → estado planificado inicial
+4. buildFromGeometry(geo)
+   └─ boxPivot / baseSpin / boxGroup / lidGroup criados
+   └─ para cada node: buildChild (pivot + foldGroup + meshes)
+   └─ calcFoldWindows()
+   └─ updateFolds(0)  → estado planificado
+   └─ buildAxes(L, W, H)
 
-5. Utilizador ajusta L/W/H
-   └── _scale_dieline_svg() no controller Odoo → novo SVG
-   └── fetch novo SVG → rebuildFrom(geo) → resets animação
+5. Utilizador ajusta L/W/H → ATP_DIELINE.rebuild(L, W, H)
+   └─ fetch SVG escalado → re-parseia → buildFromGeometry
 
-6. Utilizador faz upload de logo
-   └── placeImage(dataUrl) ou placePanelCenter(node)
-   └── logos[side].push({...})
-   └── applyLogoTexture() → CanvasTexture no mesh 3D
+6. Logo upload → POST /dieline/logo/upload
+   └─ base64 guardado em atp.partner.logo
 
-7. "Adicionar ao carrinho"
-   └── exportLogoState() → artwork_json
-   └── POST /dieline/order/save → sale.order.dieline criado
-   └── cart_update(product_id, qty, { dieline_config_id })
+7. Logo posicionado → placePanelCenter(node)
+   └─ logos[activeSide].push(...)
+   └─ applyLogoTexture() → CanvasTexture → mesh
 
-8. Admin abre encomenda
-   └── GET /dieline/order/<id>/svg/front → SVG com logos injetados
+8. "Adicionar ao carrinho"
+   └─ POST /dieline/order/save { artwork_json, L, W, H, ... }
+   └─ cria sale.order.dieline
+
+9. Admin → Download SVG
+   └─ GET /dieline/order/<id>/svg/front
+   └─ _inject_logos_into_svg() → SVG com logos e cotas
 ```
 
 ---
 
-## 9. Referência rápida de depuração
+## 13. Convenções de código e nomenclatura
 
-### Ver keys dos painéis no 3D
+### Keys de painéis
 
-Os labels amarelos sobrepostos em cada painel mostram o número (`p0`, `p1`, etc.) correspondente a `panel_0`, `panel_1`, etc. após o reorder.
+- **Pré-reorder** (dentro do TemplateMapper): `panel_0` = maior área, `panel_1` = 2.º maior, etc.
+- **Pós-reorder** (engine + logo2d + artwork): `panel_0` = root BFS, `panel_1`, `panel_2`, … em BFS order
 
-Para ver a estrutura completa antes do reorder (útil ao escrever um novo mapper):
-```js
-// Na consola do browser, depois de parsear
-window._lastGeo.nodes.forEach(n => console.log(n.key, n.parentKey, n.animGroup, n.foldSign));
+### Mesh names (Three.js)
+
+| Nome | Descrição |
+|------|-----------|
+| `panel_N_outer` | Face exterior (FrontSide) |
+| `panel_N_inner` | Face interior (BackSide) |
+| `panel_N_edge` | Borda lateral decorativa |
+
+### Artwork JSON
+
+```json
+{
+  "__logo__":    { "panelKey": "panel_0", "side": "outer", "s": 55, "d": 40, "sizeMM": 80, "rot": 0, "dataUrl": "..." },
+  "__logo__1":   { "panelKey": "panel_1", "side": "outer", "s": 30, "d": 25, "sizeMM": 60, "rot": 90, "dataUrl": "..." },
+  "__logo_back__": { ... }
+}
 ```
 
-### Problema: painel dobra no sentido errado
+- Índice 0: sem sufixo numérico (`__logo__`, `__logo_back__`)
+- Índices > 0: sufixo numérico (`__logo__1`, `__logo_back__1`, …)
 
-Verificar `foldSign` do nó. `-1` = exterior (normal), `+1` = interior (invertido). Corrigir no mapper:
-```js
-nodeByKey['panel_X'].foldSign = 1; // forçar dobra interior
-```
+### Espaços de coordenadas
 
-### Problema: painel anima na fase errada
+| Nome | Espaço | Unidade | Descrição |
+|------|--------|---------|-----------|
+| SVG-px | SVG 2D entrada | pixels | Coordenadas directas do SVG |
+| mm | Real | milímetros | Dimensão real do cartão |
+| local (s, d) | Painel | mm | s=ao longo aresta, d=perpendicular |
+| canvas-px | Canvas 2D | pixels lógicos | Viewport com pan/zoom |
+| scene/world | Three.js | mm | Coordenadas da cena 3D |
 
-Verificar `animGroup`. Grupos menores animam primeiro. Corrigir no `animMap` do mapper.
+### CSS classes
 
-### Problema: aresta de dobra errada (painel prende a partir do sítio errado)
+Prefixo `.atp-*` (BEM). Exemplos: `.atp-dl-page`, `.atp-dl-sidebar`, `.atp-logo2d-view`.
 
-O `edge` do nó determina o eixo de rotação. Recalcular com `sharedEdge(nA, nB)` ou forçar via bbox:
-```js
-var b = bbox(node.points);
-node.edge = {x1: b.x0, y1: b.y0, x2: b.x0, y2: b.y1}; // lado esquerdo do painel
-```
+---
 
-### Problema: painéis não detectados (SVG sem painéis)
+## 14. Cache-busting e deploy
 
-Verificar se o SVG tem `id="root_group"` no grupo raiz. Confirmar cores: vermelho exactamente `rgb(255,0,0)` e azul `rgb(0,0,255)`. Verificar se existem segmentos azuis (vincos) — sem eles, todos os painéis são filtrados.
+Os ficheiros JS são carregados com `?v=N` em `dieline_templates.xml`:
 
-### Cache do browser (JS não actualiza)
-
-Incrementar o parâmetro `?v=` nos `<script>` tags em [dieline_templates.xml](AllToPack/alltoppack_website/views/dieline_templates.xml):
 ```xml
-<script src="/web/static/src/js/dieline_parser.js?v=10"/>
+<script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.5"/>
+<script src="/alltoppack_website/static/src/js/dieline_engine.js?v=106"/>
+<script src="/alltoppack_website/static/src/js/dieline_logo2d.js?v=2"/>
 ```
 
-### Problema: logo aparece invertido no 3D
+**Regra obrigatória:** sempre que modificares qualquer um destes ficheiros JS, incrementar o `?v=` correspondente. Sem isto o browser serve a versão em cache e as alterações não aparecem mesmo após hard refresh.
 
-O painel tem `_texYInvert=true` (root) ou a face está `faceFlipped`. Verificar se o campo `_dvInverted` está a ser usado correctamente no logo2d para compensar a inversão UV-v.
+O utilizador gere o processo Odoo exclusivamente pelo VSCode — **nunca parar/iniciar/matar o processo manualmente**. Para aplicar alterações nos JS basta incrementar o `?v=` e fazer hard refresh no browser (Ctrl+Shift+R).
