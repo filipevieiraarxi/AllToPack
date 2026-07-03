@@ -13,3 +13,6 @@ __pycache__/
 # Segredos (Stripe, etc.) — NUNCA commitar
 *stripe_keys*.json
 *.secret.json
+
+# Config local do Odoo (addons_path é específico da máquina/projeto)
+odoo18.conf

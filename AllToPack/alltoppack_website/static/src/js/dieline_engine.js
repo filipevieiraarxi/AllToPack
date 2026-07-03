@@ -1398,7 +1398,7 @@
                 var btn = document.getElementById('atp-btn-addcart');
                 if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin me-2"/>A guardar...'; }
                 saveOrderDieline()
-                    .then(function(res) {c
+                    .then(function(res) {
                         var configInput = document.getElementById('cart-dieline-config-id');
                         if (configInput && res.dieline_config_id) {
                             configInput.value = res.dieline_config_id;

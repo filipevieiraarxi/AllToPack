@@ -2,12 +2,106 @@
 import base64
 import json
 import re
+import subprocess
+import tempfile
+import os
 
 from odoo import http
 from odoo.http import request
 from odoo.tools import html_escape
+from odoo.tools.misc import find_in_path
 from markupsafe import Markup
 from odoo.addons.website_sale.controllers.main import WebsiteSale
+
+
+def _prepare_svg_for_pdf(svg_text, target_width_px=1000):
+    """Prepara o SVG do dieline para ser renderizado pelo motor Qt WebKit do
+    wkhtmltopdf, que tem duas limitações relevantes aqui:
+
+    1. Não suporta DOCTYPE/ENTITY custom (usados para reaproveitar estilos
+       nas linhas do dieline) — o SVG falha a analisar e sai em branco.
+       Resolvido substituindo cada entidade pelo seu valor literal.
+    2. Não respeita `width:100%`/`object-fit` em <svg> (CSS moderno) — o
+       elemento fica cortado no tamanho do viewport em vez de escalar.
+       Resolvido definindo width/height explícitos em px no próprio <svg>,
+       mantendo a proporção original.
+
+    :return: tuple (svg_text_pronto, width, height) em px do SVG original.
+    """
+    entities = dict(re.findall(r"<!ENTITY\s+(\S+)\s+'([^']*)'", svg_text))
+    if entities:
+        svg_text = re.sub(r'&(\w+);', lambda m: entities.get(m.group(1), m.group(0)), svg_text)
+    svg_text = re.sub(r'<!DOCTYPE[^>[]*(\[.*?\])?>', '', svg_text, flags=re.DOTALL)
+
+    width = height = None
+    m = re.search(r'<svg\b[^>]*>', svg_text)
+    if m:
+        svg_tag = m.group(0)
+        wm = re.search(r'\bwidth="([\d.]+)"', svg_tag)
+        hm = re.search(r'\bheight="([\d.]+)"', svg_tag)
+        if wm and hm:
+            width, height = float(wm.group(1)), float(hm.group(1))
+            new_tag = svg_tag
+            if 'viewBox=' not in new_tag:
+                new_tag = new_tag[:-1] + ' viewBox="0 0 %g %g">' % (width, height)
+            target_height_px = target_width_px * height / width
+            new_tag = re.sub(r'\swidth="[\d.]+"', ' width="%g"' % target_width_px, new_tag)
+            new_tag = re.sub(r'\sheight="[\d.]+"', ' height="%g"' % target_height_px, new_tag)
+            svg_text = svg_text.replace(svg_tag, new_tag, 1)
+
+    return svg_text, width, height
+
+
+def _svg_to_pdf_bytes(svg_text):
+    """Converte um SVG (string) em PDF (bytes) via wkhtmltopdf."""
+    try:
+        wkhtmltopdf_bin = find_in_path('wkhtmltopdf')
+    except IOError:
+        wkhtmltopdf_bin = 'wkhtmltopdf'
+
+    svg_text, width, height = _prepare_svg_for_pdf(svg_text)
+    landscape = bool(width and height and width > height)
+
+    html = (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"/>'
+        '<style>*{margin:0;padding:0;}</style></head>'
+        '<body>' + svg_text + '</body></html>'
+    )
+
+    html_fd, html_path = tempfile.mkstemp(suffix='.html', prefix='atp_dieline.tmp.')
+    pdf_fd, pdf_path = tempfile.mkstemp(suffix='.pdf', prefix='atp_dieline.tmp.')
+    os.close(pdf_fd)
+    try:
+        with os.fdopen(html_fd, 'wb') as f:
+            f.write(html.encode('utf-8'))
+
+        command_args = [
+            wkhtmltopdf_bin,
+            '--quiet',
+            '--enable-local-file-access',
+            '--page-size', 'A4',
+        ]
+        if landscape:
+            command_args += ['--orientation', 'Landscape']
+        command_args += [
+            '--margin-top', '5',
+            '--margin-bottom', '5',
+            '--margin-left', '5',
+            '--margin-right', '5',
+            html_path, pdf_path,
+        ]
+        process = subprocess.run(command_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if process.returncode != 0:
+            raise RuntimeError('wkhtmltopdf falhou: %s' % process.stderr.decode(errors='replace'))
+
+        with open(pdf_path, 'rb') as f:
+            return f.read()
+    finally:
+        for path in (html_path, pdf_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def _scale_dieline_svg(svg_text, L0, W0, H0, L, W, H):
@@ -429,15 +523,8 @@ class DielineController(http.Controller):
             ('Cache-Control', 'no-cache'),
         ])
 
-    @http.route('/dieline/order/<int:config_id>/svg/<string:side>', type='http', auth='public')
-    def order_dieline_svg_side(self, config_id, side, **kwargs):
-        """Serve o SVG escalado com todos os logos + cotas injectados."""
-        if side not in ('front', 'back'):
-            return request.not_found()
-        rec = request.env['sale.order.dieline'].sudo().browse(config_id)
-        if not rec.exists():
-            return request.not_found()
-
+    def _build_order_dieline_svg(self, rec, side):
+        """Constrói o SVG escalado com todos os logos + cotas injectados para uma encomenda."""
         svg_text = None
         if rec.dieline_svg:
             try:
@@ -465,7 +552,7 @@ class DielineController(http.Controller):
             except Exception:
                 pass
         if not svg_text:
-            return request.not_found()
+            return None
 
         try:
             artwork = json.loads(rec.artwork_json or '{}')
@@ -475,10 +562,51 @@ class DielineController(http.Controller):
         except Exception:
             pass
 
+        return svg_text
+
+    @http.route('/dieline/order/<int:config_id>/svg/<string:side>', type='http', auth='public')
+    def order_dieline_svg_side(self, config_id, side, **kwargs):
+        """Serve o SVG escalado com todos os logos + cotas injectados."""
+        if side not in ('front', 'back'):
+            return request.not_found()
+        rec = request.env['sale.order.dieline'].sudo().browse(config_id)
+        if not rec.exists():
+            return request.not_found()
+
+        svg_text = self._build_order_dieline_svg(rec, side)
+        if not svg_text:
+            return request.not_found()
+
         fname = 'dieline_%s_%d.svg' % (side, config_id)
         return request.make_response(svg_text.encode('utf-8'), headers=[
             ('Content-Type', 'image/svg+xml; charset=utf-8'),
             ('Content-Disposition', 'attachment; filename="%s"' % fname),
+            ('Cache-Control', 'no-cache'),
+        ])
+
+    @http.route('/dieline/order/<int:config_id>/pdf/<string:side>', type='http', auth='public')
+    def order_dieline_pdf_side(self, config_id, side, **kwargs):
+        """Serve o dieline (com logos + cotas) convertido para PDF."""
+        if side not in ('front', 'back'):
+            return request.not_found()
+        rec = request.env['sale.order.dieline'].sudo().browse(config_id)
+        if not rec.exists():
+            return request.not_found()
+
+        svg_text = self._build_order_dieline_svg(rec, side)
+        if not svg_text:
+            return request.not_found()
+
+        try:
+            pdf_data = _svg_to_pdf_bytes(svg_text)
+        except Exception:
+            return request.not_found()
+
+        fname = 'dieline_%s_%d.pdf' % (side, config_id)
+        return request.make_response(pdf_data, headers=[
+            ('Content-Type', 'application/pdf'),
+            ('Content-Disposition', 'attachment; filename="%s"' % fname),
+            ('Content-Length', str(len(pdf_data))),
             ('Cache-Control', 'no-cache'),
         ])
 
@@ -533,6 +661,44 @@ class DielineController(http.Controller):
             logo.unlink()
             return {'ok': True}
         return {'ok': False}
+
+
+def _logo_dataurl_to_svg_element(data_url, x, y, w, h, rot_attr=''):
+    """Constrói o elemento SVG que desenha o logo na posição/tamanho dados.
+
+    Para logos SVG (data:image/svg+xml), o conteúdo é inlinado como <svg>
+    aninhado em vez de <image href="data:image/svg+xml;...">: o motor
+    Qt WebKit usado pelo wkhtmltopdf não renderiza SVG-dentro-de-SVG
+    referenciado via data URI em <image> (sai em branco no PDF), mas
+    processa normalmente SVG nativo inline.
+    Para logos raster (PNG/JPEG), <image href="data:..."> funciona bem e
+    mantém-se o comportamento original.
+    """
+    if data_url.startswith('data:image/svg+xml'):
+        try:
+            header, b64_data = data_url.split(',', 1)
+            inner_svg = base64.b64decode(b64_data).decode('utf-8', errors='replace')
+            inner_tag_m = re.search(r'<svg\b[^>]*>', inner_svg)
+            inner_tag = inner_tag_m.group(0) if inner_tag_m else ''
+            vb_m = re.search(r'viewBox="([^"]+)"', inner_tag)
+            if vb_m:
+                view_box = vb_m.group(1)
+            else:
+                iw_m = re.search(r'\bwidth="([\d.]+)"', inner_tag)
+                ih_m = re.search(r'\bheight="([\d.]+)"', inner_tag)
+                view_box = '0 0 %s %s' % (
+                    iw_m.group(1) if iw_m else '100',
+                    ih_m.group(1) if ih_m else '100',
+                )
+            m = re.match(r'.*?<svg\b[^>]*>(.*)</svg>\s*$', inner_svg, re.DOTALL)
+            inner_content = m.group(1) if m else inner_svg
+            return '<svg x="%g" y="%g" width="%g" height="%g" viewBox="%s" preserveAspectRatio="xMidYMid meet"%s>%s</svg>' % (
+                x, y, w, h, view_box, rot_attr, inner_content)
+        except Exception:
+            pass  # fallback para <image> abaixo se o parsing falhar
+
+    return '<image href="%s" x="%g" y="%g" width="%g" height="%g"%s preserveAspectRatio="xMidYMid meet"/>' % (
+        data_url, x, y, w, h, rot_attr)
 
 
 def _inject_logos_into_svg(svg_text, artwork, prod, rec):
@@ -630,17 +796,9 @@ def _inject_logos_into_svg(svg_text, artwork, prod, rec):
         if rot:
             rot_attr = ' transform="rotate(%g %g %g)"' % (rot, lx, ly)
 
-        img_tag = '<image href="%s" x="%g" y="%g" width="%g" height="%g"%s preserveAspectRatio="xMidYMid meet"/>' % (
-            data_url, lx - lw / 2, ly - lh / 2, lw, lh, rot_attr)
+        img_x, img_y = lx - lw / 2, ly - lh / 2
+        img_tag = _logo_dataurl_to_svg_element(data_url, img_x, img_y, lw, lh, rot_attr)
         inject.append(img_tag)
-
-        # Cotas: largura e altura do logo em mm
-        lw_mm = size_mm
-        lh_mm = size_mm * aspect
-        inject.append(dim_line_svg(lx, ly, lx - lw / 2, ly, lw_mm / 2))
-        inject.append(dim_line_svg(lx, ly, lx + lw / 2, ly, lw_mm / 2))
-        inject.append(dim_line_svg(lx, ly, lx, ly - lh / 2, lh_mm / 2))
-        inject.append(dim_line_svg(lx, ly, lx, ly + lh / 2, lh_mm / 2))
 
         # Cotas de POSIÇÃO (distância do logo às bordas do painel) — as mesmas
         # que aparecem no 2D logo. Coords vêm em SVG-px do original → escalar.

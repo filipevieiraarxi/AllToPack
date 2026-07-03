@@ -63,7 +63,7 @@ class SaleOrderDieline(models.Model):
         self.ensure_one()
         return {
             'type': 'ir.actions.act_url',
-            'url': '/dieline/order/%d/svg/front' % self.id,
+            'url': '/dieline/order/%d/pdf/front' % self.id,
             'target': 'self',
         }
 
@@ -71,7 +71,7 @@ class SaleOrderDieline(models.Model):
         self.ensure_one()
         return {
             'type': 'ir.actions.act_url',
-            'url': '/dieline/order/%d/svg/back' % self.id,
+            'url': '/dieline/order/%d/pdf/back' % self.id,
             'target': 'self',
         }
 
