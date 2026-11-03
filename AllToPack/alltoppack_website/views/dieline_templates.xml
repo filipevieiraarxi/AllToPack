@@ -415,7 +415,7 @@
             <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"/>
             <script src="/alltoppack_website/static/src/js/OrbitControls.js"/>
             <!-- Parser e geradores devem ser carregados antes do engine -->
-            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.26"/>
+            <script src="/alltoppack_website/static/src/js/dieline_parser.js?v=8.33"/>
             <script src="/alltoppack_website/static/src/js/dieline_engine.js?v=129"/>
             <script src="/alltoppack_website/static/src/js/dieline_logo2d.js?v=2"/>
 

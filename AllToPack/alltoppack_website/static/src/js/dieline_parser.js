@@ -724,6 +724,163 @@
         });
     }
 
+    /* ── TemplateMapper FEFCO_0703 ─────────────────────────────── */
+    function templateFEFCO_0703(nodes) {
+        var adj = nodes._adj || {};
+        var nodeByKey = {};
+        nodes.forEach(function(n) { nodeByKey[n.key] = n; });
+
+        /* Aba de cola = painel de menor área com grau 1 (pendurada numa única parede) */
+        var deg1 = nodes.filter(function(n) { return (adj[n.key]||[]).length === 1; });
+        var glueFlap = deg1.slice().sort(function(a,b) { return polyArea(a.points) - polyArea(b.points); })[0];
+        if (!glueFlap) { templateGeneric(nodes); return; }
+
+        /* Ponta da cadeia = parede onde a cola está presa */
+        var glueLink = (adj[glueFlap.key]||[])[0];
+        var tubeEnd = glueLink ? nodeByKey[glueLink.otherKey] : null;
+        if (!tubeEnd) { templateGeneric(nodes); return; }
+
+        function isVerticalEdge(e) {
+            if (!e) return false;
+            return Math.abs(e.x2 - e.x1) < Math.abs(e.y2 - e.y1);
+        }
+
+        /* Percorrer a cadeia do tubo a partir da ponta (tubeEnd), seguindo
+           sempre o vizinho de grau>=2 ligado por aresta vertical, para listar
+           as 4 paredes por ordem física na faixa. */
+        var tubeChain = [tubeEnd.key];
+        (function walkChain(curKey, fromKey) {
+            var links = (adj[curKey] || []).filter(function(l) {
+                return l.otherKey !== fromKey && l.otherKey !== glueFlap.key &&
+                       (adj[l.otherKey]||[]).length >= 2 && isVerticalEdge(l.edge);
+            });
+            if (!links.length) return;
+            tubeChain.push(links[0].otherKey);
+            walkChain(links[0].otherKey, curKey);
+        }(tubeEnd.key, glueFlap.key));
+
+        var newRoot = nodeByKey[tubeChain[tubeChain.length - 1]];
+        if (!newRoot) { templateGeneric(nodes); return; }
+
+        /* Refazer BFS a partir da parede central: entre vizinhos, prioriza a
+           próxima parede do tubo (ligação vertical, vizinho de grau >= 2)
+           sobre abas/cola → a cadeia de 4 paredes entra antes na numeração. */
+        var newParent = {}, newEdge = {};
+        newParent[newRoot.key] = null;
+        newEdge[newRoot.key]   = null;
+        var queue = [newRoot.key], seen = {};
+        seen[newRoot.key] = true;
+        while (queue.length) {
+            var cur = queue.shift();
+            var links = (adj[cur] || []).slice().sort(function(a, b) {
+                if (a.otherKey === glueFlap.key) return 1;
+                if (b.otherKey === glueFlap.key) return -1;
+                var aTube = isVerticalEdge(a.edge) && (adj[a.otherKey]||[]).length >= 2;
+                var bTube = isVerticalEdge(b.edge) && (adj[b.otherKey]||[]).length >= 2;
+                if (aTube !== bTube) return aTube ? -1 : 1;
+                var na = nodeByKey[a.otherKey], nb = nodeByKey[b.otherKey];
+                return polyArea(nb.points) - polyArea(na.points);
+            });
+            links.forEach(function(link) {
+                if (seen[link.otherKey]) return;
+                seen[link.otherKey] = true;
+                newParent[link.otherKey] = cur;
+                newEdge[link.otherKey]   = link.edge;
+                queue.push(link.otherKey);
+            });
+        }
+        nodes.forEach(function(n) {
+            if (newParent[n.key] === undefined) { newParent[n.key] = newRoot.key; newEdge[n.key] = null; }
+            n.parentKey = newParent[n.key];
+            n.edge = newEdge[n.key] !== undefined ? newEdge[n.key] : n.edge;
+        });
+
+        /* Cadeia do tubo = tubeChain já calculada a partir da ponta (tubeEnd),
+           reaproveitada aqui (newRoot é um dos seus elementos, o do meio). */
+        var tubeKeys = {};
+        tubeChain.forEach(function(k) { tubeKeys[k] = true; });
+
+        /* Endireitar os vincos da cadeia do tubo: no SVG real, os vincos entre
+           paredes consecutivas não são perfeitamente verticais (variam ~0.2–0.8°
+           entre si, imprecisão normal de corte/digitalização) — isto, ao
+           contrário do que a intuição sugere, não é o que causa a parede do
+           meio a ficar "deitada" (isso acontece sempre, mesmo com vincos
+           perfeitos, é como o motor compõe duas dobras em torno de eixos
+           quase paralelos). Mas essa pequena imprecisão angular DESALINHA a
+           parede seguinte (3 dobras), que devia voltar a ficar exatamente
+           vertical e sobreposta à 1ª parede — sem esta correção ela volta
+           vertical mas deslocada; com os vincos forçados a verticais puros
+           (Δx=0 exato), o desalinhamento residual cai de ~850mm para ~10mm. */
+        nodes.forEach(function(n) {
+            if (!tubeKeys[n.key] || !n.edge || n.parentKey === null) return;
+            var e = n.edge;
+            var dx = e.x2 - e.x1, dy = e.y2 - e.y1;
+            var length = Math.sqrt(dx*dx + dy*dy);
+            n.edge = { x1: e.x1, y1: e.y1, x2: e.x1, y2: e.y1 + length * (dy >= 0 ? 1 : -1) };
+        });
+
+        /* Extensão alta (ex: parede frontal elevada tipo display) = filha de
+           uma parede do tubo que não é aba simples (grau próprio >= 2, ou
+           seja tem as suas próprias abas laterais); se houver mais que um
+           candidato, escolhe o de maior área. */
+        var extensionCandidates = nodes.filter(function(n) {
+            return !tubeKeys[n.key] && tubeKeys[n.parentKey] && n.key !== glueFlap.key &&
+                   (adj[n.key]||[]).length >= 2;
+        });
+        var extensionNode = extensionCandidates.slice().sort(function(a,b) { return polyArea(b.points) - polyArea(a.points); })[0];
+        var extensionKey = extensionNode ? extensionNode.key : null;
+
+        /* Abas laterais da extensão: filhas de paredes do tubo cujo bbox X
+           sobrepõe o da extensão (dobram para fechar as laterais dela). */
+        var extensionFlapKeys = {};
+        if (extensionKey) {
+            var eb = bbox(nodeByKey[extensionKey].points);
+            nodes.forEach(function(n) {
+                if (tubeKeys[n.key] || n.key === glueFlap.key || n.key === extensionKey) return;
+                if (!tubeKeys[n.parentKey]) return;
+                var b = bbox(n.points);
+                if (b.x1 > eb.x0 + 4 && b.x0 < eb.x1 - 4) extensionFlapKeys[n.key] = true;
+            });
+        }
+
+        /* animGroup: 0 = tubo + cola (base estática), 1 = abas de fundo +
+           extensão alta (fecham juntas), 2 = abas de topo + abas laterais
+           da extensão.
+           foldSign: a cadeia do tubo usa -1 fixo (consistente por
+           construção, direção de edge sempre da mesma orientação). As
+           restantes peças (abas, cola) têm edges com direção herdada de
+           buildFoldTree, que pode inverter-se — por isso usam
+           defaultFoldSign, calculado a partir da geometria real. */
+        nodes.forEach(function(n) {
+            if (tubeKeys[n.key]) { n.foldSign = -1; n.animGroup = 0; return; }
+            n.foldSign = defaultFoldSign(n, nodeByKey[n.parentKey]);
+            if (n.key === glueFlap.key) { n.animGroup = 0; return; }
+            if (n.key === extensionKey) { n.animGroup = 1; return; }
+            if (extensionFlapKeys[n.key]) { n.animGroup = 2; return; }
+            var parent = nodeByKey[n.parentKey];
+            var cen = polyCentroid(n.points), parCen = parent ? polyCentroid(parent.points) : cen;
+            n.animGroup = (cen.y > parCen.y) ? 1 : 2; /* abaixo da parede → fundo (1); acima → topo (2) */
+        });
+
+        /* build() renumera panel_N em BFS por ordem do array `nodes` (área
+           decrescente), ignorando a ordem de descoberta deste mapper. Para
+           que a cadeia do tubo (newRoot→…) saia numerada panel_0..3 antes das
+           abas, reordenamos o array: tubo em ordem de distância da raiz
+           (tubeChain, reindexado a partir de newRoot), depois o resto por
+           área (como já era). */
+        var rootIdxInChain = tubeChain.indexOf(newRoot.key);
+        var tubeOrder = tubeChain.slice(rootIdxInChain).concat(tubeChain.slice(0, rootIdxInChain).reverse());
+        var tubeRank = {};
+        tubeOrder.forEach(function(k, i) { tubeRank[k] = i; });
+        nodes.sort(function(a, b) {
+            var ra = tubeRank[a.key], rb = tubeRank[b.key];
+            if (ra !== undefined && rb !== undefined) return ra - rb;
+            if (ra !== undefined) return -1;
+            if (rb !== undefined) return 1;
+            return polyArea(b.points) - polyArea(a.points);
+        });
+    }
+
     /* ── TemplateMapper FEFCO_0200 ─────────────────────────────── */
     function templateFEFCO_0200(nodes) {
         _rscAnimGroups(nodes, true);
@@ -1539,6 +1696,7 @@
         'FEFCO_0426': templateFEFCO_0426,
         'FEFCO_0427': templateFEFCO_0427,
         'FEFCO_0473': templateFEFCO_0473,
+        'FEFCO_0703': templateFEFCO_0703,
         'FEFCO_04XX': templateFEFCO_04XX,
         'GENERIC':    templateGeneric,
     };
