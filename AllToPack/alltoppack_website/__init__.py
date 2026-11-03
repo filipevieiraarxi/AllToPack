@@ -12,7 +12,7 @@ def post_init_hook(env):
         products = env['product.template'].search([('box_type', '!=', False)])
         for p in products:
             if categ not in p.public_categ_ids:
-                p.public_categ_ids = [(4, categ.id)]
+                p.with_context(skip_box_pallet_dimension_check=True).public_categ_ids = [(4, categ.id)]
 
     logo_path = os.path.join(
         os.path.dirname(__file__),

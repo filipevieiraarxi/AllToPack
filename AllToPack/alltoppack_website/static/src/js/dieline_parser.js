@@ -896,10 +896,317 @@
 
     /* ── TemplateMapper FEFCO_0473 ─────────────────────────────────
        Caixa com fita biadesiva (montagem rápida). Tem uma aba de canto que
-       dobra na diagonal — daí a topologia de fold ser pouco intuitiva. Usa o
-       mapper genérico por conectividade de fold; afinar foldSign/animGroup
-       depois de ver no 3D. */
-    function templateFEFCO_0473(nodes) { _foldTreeByConnectivity(nodes); }
+       dobra na diagonal — daí a topologia de fold ser pouco intuitiva.
+
+       Bug confirmado no mapper genérico por conectividade: a fronteira
+       entre a parede principal e duas das paredes seguintes (as que ficam
+       geometricamente "por baixo" dela no SVG planificado) é feita por
+       linha de CORTE, não vinco — por isso _foldTreeByConnectivity liga-as
+       directamente à parede principal (fallback de corte, sem dobra real),
+       em vez de as ligar pela sua verdadeira aresta de vinco LATERAL (que
+       as liga entre si, não à parede principal). Corrigido abaixo por
+       reatribuição pós-processamento, usando nodes._adj (todas as arestas
+       reais) para encontrar essa ligação por vinco ignorada pelo BFS. */
+    function templateFEFCO_0473(nodes) {
+        _foldTreeByConnectivity(nodes);
+        _fixFEFCO_0473_sideFolds(nodes);
+    }
+
+    /* Para cada par de nós actualmente ligados ao mesmo pai por uma aresta
+       de CORTE curta, procura em _adj se existe entre eles uma aresta de
+       VINCO mais longa que o algoritmo genérico ignorou (porque ambos já
+       estavam "vistos" quando essa aresta foi processada) — e, se existir,
+       reatribui um dos dois como filho do outro por essa aresta real. */
+    function _fixFEFCO_0473_sideFolds(nodes) {
+        var adj = nodes._adj || {};
+        var nodeByKey = {};
+        nodes.forEach(function(n) { nodeByKey[n.key] = n; });
+
+        function bbox(points) {
+            var x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+            points.forEach(function(p) {
+                if (p.x<x0) x0=p.x; if (p.x>x1) x1=p.x;
+                if (p.y<y0) y0=p.y; if (p.y>y1) y1=p.y;
+            });
+            return { x0:x0, y0:y0, x1:x1, y1:y1 };
+        }
+
+        /* Confirmado por inspecção visual (não um algoritmo genérico): dois
+           pares específicos desta caixa têm vinco real entre si que
+           _foldTreeByConnectivity ignora (liga cada um deles ao pai errado
+           por uma aresta de corte mais curta encontrada primeiro no BFS).
+           Identificam-se por geometria (bbox), não por key — a key muda
+           consoante a ordem de processamento do DCEL, a posição não. */
+        var pairs = [
+            /* painel ~(1016,1002)-(1875,1580) vs painel ~(721,1002)-(1016,1580):
+               fronteira vertical em x≈1016 — vinco real, ignorado. */
+            { a: {x:1445, y:1290}, b: {x:868, y:1290} },
+            /* painel ~(1875,1002)-(2169,1580) vs painel ~(2169,1002)-(2413,1580):
+               fronteira vertical em x≈2169 — vinco real, ignorado. */
+            { a: {x:2022, y:1290}, b: {x:2291, y:1290} },
+            /* painel ~(426,1002)-(721,1580) vs painel ~(721,1002)-(1016,1580):
+               fronteira vertical em x≈721 — vinco real, ignorado (o primeiro
+               estava ligado por corte ao painel acima, y≈1002). */
+            { a: {x:573, y:1290}, b: {x:868, y:1290} },
+            /* painel à direita ~(1875,1002)-(2169,1580) vs painel grande
+               ~(1016,1002)-(1875,1580): vinco directo (aresta vertical
+               longa em x≈1875, y 1030-1580). Forçar o da direita como
+               filho do grande (childIsA=false) — o grande é quem liga à
+               base (ver par seguinte), não o contrário. */
+            { a: {x:1445, y:1290}, b: {x:2022, y:1290}, childIsA: false },
+            /* triângulo ~(1478,1002)-(1875,1200) [já filho da base por
+               vinco genuíno] vs painel grande ~(1016,1002)-(1875,1580):
+               partilham DOIS segmentos de fronteira consecutivos (um "V")
+               — (1478,1002)-(1705,1200) é CORTE, mas (1705,1200)-(1875,1030)
+               é VINCO real. O merge genérico de _adj só guarda o 1º
+               segmento encontrado (corte) e descarta o 2º — por isso este
+               vinco nunca aparece em nodes._adj. Usar a aresta explícita
+               (confirmada no SVG original, id170) em vez de procurar em
+               _adj. Forçar o grande como filho do triângulo — assim o
+               grupo inteiro (grande + direita) liga à base via o
+               triângulo, que é a única ligação de vinco real existente. */
+            {
+                a: {x:1676, y:1116}, b: {x:1445, y:1290}, childIsA: false,
+                explicitEdge: { x1: 1704.59, y1: 1200.44, x2: 1874.67, y2: 1030.37 },
+            },
+            /* painel ~(1903,86)-(2235,1002) vs aba pequena ~(2220,86)-(2413,1002):
+               fronteira em "zigzag" (tranqueta de fecho) — os 2 segmentos
+               longos externos (x≈2220) são VINCO real; os 3 curtos do
+               dente central são corte. _adj só guarda o 1º encontrado
+               (corte). Aresta explícita confirmada no SVG original. */
+            {
+                a: {x:2069, y:544}, b: {x:2316, y:544}, childIsA: false,
+                explicitEdge: { x1: 2220.49, y1: 657.61, x2: 2220.49, y2: 1002.02 },
+                invertFoldSign: true,
+            },
+            /* painel ~(426,86)-(999,1002) vs aba pequena ~(350,431)-(435,658):
+               padrão em espelho — o segmento CURTO central do dente
+               (x≈434.7, y 439-649) é VINCO real; os longos externos
+               (x≈426) são corte. Aresta explícita confirmada no SVG
+               original (id177). */
+            {
+                a: {x:712, y:544}, b: {x:392, y:544}, childIsA: false,
+                explicitEdge: { x1: 434.66, y1: 439.34, x2: 434.66, y2: 649.11 },
+            },
+        ];
+
+        function findByApproxCenter(pt) {
+            var best = null, bestD = Infinity;
+            nodes.forEach(function(n) {
+                var bb = bbox(n.points);
+                var cx = (bb.x0+bb.x1)/2, cy = (bb.y0+bb.y1)/2;
+                var d = Math.hypot(cx-pt.x, cy-pt.y);
+                if (d < bestD) { bestD = d; best = n; }
+            });
+            return bestD < 80 ? best : null;
+        }
+
+        pairs.forEach(function(pair) {
+            var a = findByApproxCenter(pair.a);
+            var b = findByApproxCenter(pair.b);
+            if (!a || !b) return;
+            /* encontrar a aresta de vinco real entre a e b em _adj */
+            var link = pair.explicitEdge
+                ? { edge: pair.explicitEdge, isFold: true }
+                : (adj[a.key] || []).filter(function(lk) { return lk.otherKey === b.key && lk.isFold; })[0];
+            if (!link) return;
+            var child, parent;
+            if (pair.childIsA !== undefined) {
+                /* par com papel explícito (não inferido por profundidade) */
+                child = pair.childIsA ? a : b;
+                parent = child === a ? b : a;
+            } else {
+                /* religar o que estiver mais fundo na árvore (para não
+                   inverter a hierarquia do lado já correcto) ao outro. */
+                var aDepthFromRoot = 0, cur = a;
+                while (cur && cur.parentKey) { aDepthFromRoot++; cur = nodeByKey[cur.parentKey]; }
+                var bDepthFromRoot = 0; cur = b;
+                while (cur && cur.parentKey) { bDepthFromRoot++; cur = nodeByKey[cur.parentKey]; }
+                child = aDepthFromRoot >= bDepthFromRoot ? a : b;
+                parent = child === a ? b : a;
+            }
+            var childLink = pair.explicitEdge
+                ? link
+                : (adj[child.key] || []).filter(function(lk) { return lk.otherKey === parent.key && lk.isFold; })[0];
+            if (!childLink) return;
+            child.parentKey = parent.key;
+            child.edge = childLink.edge;
+            child.isFoldEdge = true;
+            if (pair.invertFoldSign) child._invertFoldSign = true;
+        });
+
+        /* Recalcular profundidade (animGroup) e foldSign depois da religação,
+           tal como _foldTreeByConnectivity faz no fim. */
+        var root = nodes.filter(function(n) { return n.parentKey == null; })[0];
+        if (!root) return;
+        var depth = {}, dq = [root.key];
+        depth[root.key] = 0;
+        while (dq.length) {
+            var cur2 = dq.shift();
+            nodes.forEach(function(n) {
+                if (n.parentKey === cur2 && depth[n.key] === undefined) {
+                    depth[n.key] = depth[cur2] + 1; dq.push(n.key);
+                }
+            });
+        }
+        nodes.forEach(function(n) {
+            if (n.parentKey == null) { n.foldSign = -1; n.animGroup = 0; return; }
+            n.foldSign = defaultFoldSign(n, nodeByKey[n.parentKey] || null);
+            if (n._invertFoldSign) n.foldSign *= -1;
+            n.animGroup = depth[n.key] !== undefined ? depth[n.key] : 1;
+        });
+
+        /* Grupo "tampa de fecho automático" confirmado: APENAS o triângulo
+           ~(1478,1002)-(1875,1200) + o painel grande ~(1016,1002)-(1875,1580)
+           (seu filho directo) levantam juntos, isolados, ANTES do resto da
+           caixa. Os descendentes do grande (painel direito e os seus
+           próprios filhos) NÃO entram neste grupo — dobram depois, na
+           sequência normal. O triângulo (charneira real com a base) fecha
+           a 180° para o conjunto ficar deitado sobre a base; mantém a cor
+           de parede normal (não de tampa) apesar do ângulo de 180°. */
+        (function() {
+            var byKeyNow = {};
+            nodes.forEach(function(n) { byKeyNow[n.key] = n; });
+            var hinge = findByApproxCenter({x:1676, y:1116});
+            if (!hinge) return;
+            hinge = byKeyNow[hinge.key];
+            var child = nodes.filter(function(n) { return n.parentKey === hinge.key; })[0];
+            var groupKeys = { };
+            groupKeys[hinge.key] = true;
+            if (child) groupKeys[child.key] = true;
+            /* isolar animGroup: grupo abre primeiro (0); resto sobe +1 */
+            nodes.forEach(function(n) {
+                if (groupKeys[n.key] || n.parentKey == null) return;
+                n.animGroup = (n.animGroup || 0) + 1;
+            });
+            Object.keys(groupKeys).forEach(function(k) { byKeyNow[k].animGroup = 0; });
+            hinge.angle = 180;
+            hinge._lidColor = false;
+            if (child) {
+                child.angle = 180;
+                child._lidColor = false;
+                /* todos os descendentes do grande (filhos directos e
+                   netos) tiveram o foldSign calculado pela geometria 2D
+                   assumindo o pai na orientação normal (de pé) — mas o
+                   grande ficou deitado (angle=180), por isso dobram todos
+                   para o lado errado. Inverter o foldSign de toda a
+                   subárvore abaixo do grande. */
+                var descKeys = {}; descKeys[child.key] = true;
+                var ch = true;
+                while (ch) {
+                    ch = false;
+                    nodes.forEach(function(n) {
+                        if (!descKeys[n.key] && n.parentKey && descKeys[n.parentKey]) {
+                            descKeys[n.key] = true; ch = true;
+                        }
+                    });
+                }
+                nodes.forEach(function(n) {
+                    if (n.key !== child.key && descKeys[n.key]) n.foldSign *= -1;
+                });
+            }
+        })();
+
+        /* Ordem de fecho pedida: {painel direito, painel esquerdo do
+           grande, e os seus filhos/netos} (identificados por bbox) fecham
+           ANTES de {as duas paredes laterais da base e as suas abas}.
+           Trocar os animGroup relativos entre os dois blocos, mantendo a
+           ordem interna de cada um. */
+        (function() {
+            var byKeyNow = {};
+            nodes.forEach(function(n) { byKeyNow[n.key] = n; });
+            function at(pt) {
+                var best = null, bestD = Infinity;
+                nodes.forEach(function(n) {
+                    var bb = bbox(n.points);
+                    var cx = (bb.x0+bb.x1)/2, cy = (bb.y0+bb.y1)/2;
+                    var d = Math.hypot(cx-pt.x, cy-pt.y);
+                    if (d < bestD) { bestD = d; best = n; }
+                });
+                return bestD < 80 ? byKeyNow[best.key] : null;
+            }
+            /* bloco A: as duas paredes laterais da base + toda a sua
+               subárvore (abas) — fecham DEPOIS. Semeado só pelas duas
+               paredes (panel_1≈2069,544 e panel_2≈1162,544); a expansão
+               de subárvore abaixo apanha as suas abas automaticamente,
+               evitando errar as coordenadas das abas (que mudam de key). */
+            var blockASeeds = [
+                at({x:2069, y:544}),  /* parede direita da base */
+                at({x:1162, y:544}),  /* parede esquerda da base */
+            ].filter(Boolean);
+            var blockAKeys = {};
+            blockASeeds.forEach(function(n) { blockAKeys[n.key] = true; });
+            var chA = true;
+            while (chA) {
+                chA = false;
+                nodes.forEach(function(n) {
+                    if (!blockAKeys[n.key] && n.parentKey && blockAKeys[n.parentKey]) {
+                        blockAKeys[n.key] = true; chA = true;
+                    }
+                });
+            }
+            var blockA = blockASeeds;
+            /* bloco B: painel direito/esquerdo do grande + filhos (fecham ANTES) */
+            var blockB = [
+                at({x:2022, y:1290}), /* painel direito do grande */
+                at({x:868, y:1290}),  /* painel esquerdo do grande */
+            ].filter(Boolean);
+            /* expandir bloco B para incluir os seus filhos (netos do grande) */
+            var blockBKeys = {};
+            blockB.forEach(function(n) { blockBKeys[n.key] = true; });
+            var ch2 = true;
+            while (ch2) {
+                ch2 = false;
+                nodes.forEach(function(n) {
+                    if (!blockBKeys[n.key] && n.parentKey && blockBKeys[n.parentKey]) {
+                        blockBKeys[n.key] = true; ch2 = true;
+                    }
+                });
+            }
+            var blockAKeyList = Object.keys(blockAKeys);
+            if (!blockAKeyList.length || !Object.keys(blockBKeys).length) return;
+            /* menor animGroup actual de cada bloco, para preservar a ordem
+               interna relativa (apenas desloca o bloco inteiro). */
+            var minA = Math.min.apply(null, blockAKeyList.map(function(k){return byKeyNow[k].animGroup;}));
+            var minB = Math.min.apply(null, Object.keys(blockBKeys).map(function(k){return byKeyNow[k].animGroup;}));
+            if (minB < minA) {
+                /* já está na ordem pedida (B antes de A) */
+                return;
+            }
+            /* trocar: B passa a começar onde A começava, A passa a seguir
+               depois do fim de B (preservando as suas ordens internas). */
+            var shiftBtoA = minA - minB;
+            var maxBafterShift = Math.max.apply(null, Object.keys(blockBKeys).map(function(k){return byKeyNow[k].animGroup + shiftBtoA;}));
+            var shiftAafterB = (maxBafterShift + 1) - minA;
+            nodes.forEach(function(n) {
+                if (blockBKeys[n.key]) { n.animGroup += shiftBtoA; return; }
+                if (blockAKeys[n.key]) { n.animGroup += shiftAafterB; return; }
+            });
+        })();
+
+        /* panel_7 (aba, filho de panel_5) deve dobrar ANTES de panel_5.
+           Trocar os seus animGroup. */
+        (function() {
+            var byKeyNow = {};
+            nodes.forEach(function(n) { byKeyNow[n.key] = n; });
+            function at(pt) {
+                var best = null, bestD = Infinity;
+                nodes.forEach(function(n) {
+                    var bb = bbox(n.points);
+                    var cx = (bb.x0+bb.x1)/2, cy = (bb.y0+bb.y1)/2;
+                    var d = Math.hypot(cx-pt.x, cy-pt.y);
+                    if (d < bestD) { bestD = d; best = n; }
+                });
+                return bestD < 80 ? byKeyNow[best.key] : null;
+            }
+            var p5 = at({x:712, y:544});
+            var p7 = at({x:392, y:544});
+            if (!p5 || !p7) return;
+            var tmp = p5.animGroup;
+            p5.animGroup = p7.animGroup;
+            p7.animGroup = tmp;
+        })();
+    }
 
     /* ── TemplateMapper FEFCO_0422 ─────────────────────────────── */
     function templateFEFCO_0422(nodes) {
@@ -1300,11 +1607,16 @@
                 });
             }
             nodes.forEach(function(n) { if (!oldToNew[n.key]) oldToNew[n.key] = 'panel_' + (counter++); });
+            /* Capturar a nova key do trueRoot ANTES de reescrever n.key em todos
+               os nós — senão o root é "reencontrado" pela ordem do array (que é
+               arbitrária) em vez de pela identidade escolhida acima, o que pode
+               devolver a peça errada em caixas de 2 raízes (lid+base). */
+            var trueRootNewKey = oldToNew[trueRoot.key];
             nodes.forEach(function(n) {
                 n.key = oldToNew[n.key];
                 if (n.parentKey !== null) n.parentKey = oldToNew[n.parentKey] || n.parentKey;
             });
-            trueRoot = nodes.filter(function(n) { return n.parentKey == null; })[0] || nodes[0];
+            trueRoot = nodes.filter(function(n) { return n.key === trueRootNewKey; })[0] || nodes[0];
         }());
 
         return { meta: meta, unit: unit, rootKey: trueRoot.key, type: boxType, nodes: nodes };

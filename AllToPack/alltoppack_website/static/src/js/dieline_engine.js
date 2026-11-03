@@ -15,7 +15,6 @@
     var _cfg = window.ATP_CONFIG || {};
 
     var animT = 0, animPlaying = false, animDir = 1, animRAF = null;
-    var insertT = 0, insertPlaying = false, insertDir = 1, insertRAF = null;
     var autoRotate = false, currentView = '3d';
 
     /* ZOOM_MAX é dinâmico: recalculado a cada rebuild a partir do tamanho da
@@ -39,14 +38,12 @@
 
     /* árvore de dobras montada: lista de { node, pivot, foldSign, axis } */
     var folds = [];
-    /* Para caixas de 2 peças (FEFCO_0330): grupo THREE.js separado para a tampa,
-       com translação Y animada para simular o encaixe. */
+    /* Para caixas de 2 peças (FEFCO_0330): grupo THREE.js separado para a
+       tampa — fica sempre na sua posição estática (lado a lado), sem
+       sequência animada de encaixe. */
     var lidGroup = null;
-    var lidAnimData = null; /* { startY, endY, tStart, tEnd } */
-    var insertData = null;  /* { baseY0, baseY1, lidY0, lidY1, maxH } — para animação insert */
-    /* Animação combinada: o play normal faz dobras (0→INSERT_START) e depois a
-       sequência de encaixe base+lid (INSERT_START→1). _insertActive evita repetir
-       o setup/teardown a cada frame. */
+    var lidSpin = null;  /* roda a lid 180°Y+90°Z e desloca-a até à base no insert — ver buildFromGeometry */
+    var insertData = null;
     var INSERT_START = 0.6;
     var _insertActive = false;
     var svgTextCache = null;
@@ -123,7 +120,7 @@
            boxGroup: filho do pivot, deslocado para que o centro geométrico
            da caixa coincida com a origem — assim a rotação é sobre si próprio. */
         boxPivot = new THREE.Group();
-        baseSpin = new THREE.Group();   /* roda a base 90° sobre o seu centro (origem) no insert */
+        baseSpin = new THREE.Group();   /* grupo neutro na hierarquia — a base nunca roda nem se desloca no insert, fica sempre fixa */
         boxGroup = new THREE.Group();
         baseSpin.add(boxGroup);
         boxPivot.add(baseSpin);
@@ -143,15 +140,25 @@
         var metaThk = geo.meta && parseFloat(geo.meta.thickness);
         matThickness = (metaThk && metaThk > 0) ? metaThk : THICKNESS_DEFAULT;
 
-        var rootNode = geo.nodes[0];
+        /* geo.nodes[0] é só o primeiro elemento FÍSICO do array — a ordem do
+           array não é reordenada pelo renumeramento em DielineParser.build(),
+           só as .key são reescritas. Para caixas de 2 peças isto pode não ser
+           o verdadeiro root (panel_0); usar geo.rootKey, que já identifica a
+           base corretamente. */
+        var rootNode = geo.nodes.filter(function(n){ return n.key === geo.rootKey; })[0] || geo.nodes[0];
         var rb = polyBBox(rootNode.points);
         var off = { x: rb.minX, y: rb.minY };
         var rootArea = polyArea(rootNode.points);
 
         /* Centrar o p0 actual (parentKey==null = root da árvore de dobras).
            Para 0201/0215 o root é uma parede offset — usar o seu centro
-           para o position sem afectar sceneOf nem a animação. */
-        var actualRoot = geo.nodes.filter(function(n){ return n.parentKey == null; })[0] || rootNode;
+           para o position sem afectar sceneOf nem a animação.
+           Para caixas de 2 peças (lid+base), há DOIS nós com parentKey==null
+           — usar geo.rootKey (já escolhido corretamente como a base, não o
+           lid, por DielineParser.build) em vez do primeiro da lista. */
+        var actualRoot = geo.nodes.filter(function(n){ return n.key === geo.rootKey; })[0]
+            || geo.nodes.filter(function(n){ return n.parentKey == null; })[0]
+            || rootNode;
         var ab = polyBBox(actualRoot.points);
         var baseL = mm(ab.w), baseW = mm(ab.h);
         var p0cx = mm((ab.minX + ab.maxX) / 2 - off.x);
@@ -199,7 +206,7 @@
         var groups = {};
         folds = [];
         lidGroup = null;
-        lidAnimData = null;
+        lidSpin = null;
 
         /* Para caixas de 2 peças: detectar o node com _lidRoot=true */
         var lidRootNode = null;
@@ -228,18 +235,31 @@
             var lidOffX = mm((lidRb.minX + lidRb.maxX) / 2 - (rb.minX + rb.maxX) / 2);
             var lidOffZ = mm((lidRb.minY + lidRb.maxY) / 2 - (rb.minY + rb.maxY) / 2);
 
+            /* lidSpin: envolve lidGroup tal como baseSpin envolvia boxGroup
+               no mecanismo original — mas agora é a LID que roda 180°Y+90°Z
+               e viaja até à base (que fica sempre fixa), não o contrário. */
+            lidSpin = new THREE.Group();
+            boxPivot.add(lidSpin);
+
             lidGroup = new THREE.Group();
             lidGroup.rotation.x = boxGroup.rotation.x;
-            boxPivot.add(lidGroup);
+            lidSpin.add(lidGroup);
 
-            /* POSIÇÃO INICIAL INTOCADA: lid no seu sítio natural (lado a lado). */
+            /* POSIÇÃO INICIAL: lid no seu sítio natural (lado a lado, o mesh
+               raiz continua a usar o offset da BASE como todos os outros
+               painéis — não mexer nisso, os filhos da lid ligam-se ao seu
+               pai via sceneOf, que depende desse offset partilhado).
+               Correção aplicada só na posição do GRUPO, não na geometria:
+               os dois painéis raiz (base/lid) estão desenhados no SVG com
+               centros Y diferentes (desnível real do desenho) — soma-se
+               lidOffZ para nivelar no eixo L (mapeado para Y da cena). */
             lidGroup.position.copy(boxGroup.position);
+            lidGroup.position.y -= lidOffZ;
 
-            lidAnimData = null;
-
-            /* Separação REAL entre as peças: média de TODOS os pontos de cada
-               grupo (não só dos roots — os roots têm centros coincidentes).
-               Isto capta a separação lado-a-lado verdadeira em coords SVG. */
+            /* Separação REAL entre as peças: média de TODOS os pontos de
+               cada grupo (não só dos roots). Usada para calcular o alvo de
+               encaixe, tal como no mecanismo original (lá para a base,
+               aqui para a lid — papéis trocados). */
             var lidCx = 0, lidCy = 0, lidN = 0;
             var baseCx = 0, baseCy = 0, baseN = 0;
             geo.nodes.forEach(function(n) {
@@ -250,31 +270,27 @@
             });
             lidCx /= (lidN || 1); lidCy /= (lidN || 1);
             baseCx /= (baseN || 1); baseCy /= (baseN || 1);
-            /* deslocamento em cena para o lid coincidir com a base */
+            /* deslocamento em cena para a lid coincidir com a base */
             var dxEncaix = mm(baseCx - lidCx);
-            var dzEncaix = mm(baseCy - lidCy);
+            var dzEncaix = mm(baseCy - lidCy); /* mapeado para Y da cena, ver nota acima */
 
             console.log('[INSERT] lidOff(root)=', lidOffX, lidOffZ,
                         ' dEncaix(pts)=', dxEncaix, dzEncaix);
 
-            var baseDepth = -maxH * 2;
+            var lidDepth = -maxH;
             insertData = {
-                /* FASE 1 — deslocamento da BASE para a sua posição (base→lid + offset Z) */
-                baseDx: -dxEncaix,
-                baseDz: -dzEncaix,
-                /* baseDepth é ajustado por medição mais abaixo (alinhar topo da
-                   base com o fundo da tampa fechada). Começa igual ao do lid. */
-                baseDepth: baseDepth,
-                /* FASE 2 — lid fecha SÓ em profundidade (mesmo eixo Z), sem mudar X. */
+                /* FASE 1 (p 0→0.5) — a LID roda 180°Y+90°Z (lidSpin) e
+                   desloca-se da sua posição natural até ficar sobre a base. */
+                lidDx: dxEncaix,
+                lidDz: dzEncaix,
+                lidDepth: lidDepth,
+                /* FASE 2 (p 0.5→1) — fecho fino: ajustado por medição real
+                   mais abaixo (bloco de calibração). */
                 lidNatural: lidGroup.position.clone(),
-                lidEncaix:  new THREE.Vector3(
-                    lidGroup.position.x,
-                    lidGroup.position.y,
-                    lidGroup.position.z + baseDepth
-                ),
             };
 
-            /* Botão insert desativado: a sequência de encaixe é parte do play. */
+            /* Botão insert desativado — a rotação de fecho corre pelo play
+               normal (ver updateFolds), não por um botão dedicado. */
             var btnInsert = document.getElementById('ctrl-insert');
             if (btnInsert) btnInsert.style.display = 'none';
         }
@@ -321,7 +337,8 @@
             var isLidRoot = (node._lidRoot && node.parentKey == null);
             var parentAttach = parent ? parent.attach : (isLidRoot ? lidGroup : boxGroup);
 
-            var color = node.angle >= 135 ? COL_LID : COL_WALL;
+            var isLidColor = (node._lidColor !== undefined) ? node._lidColor : (node.angle >= 135);
+            var color = isLidColor ? COL_LID : COL_WALL;
 
             if (node.parentKey == null) {
                 var attachGroup = isLidRoot ? lidGroup : boxGroup;
@@ -358,42 +375,31 @@
 
         updateFolds(animT);
 
-        /* ── INSERT (FEFCO_0330): preparar pivô de rotação da base ──
-           Para a base rodar 90° SOBRE SI MESMA (sem orbitar) ao clicar no
-           botão, o baseSpin tem de estar no CENTRO da base. Medimos o centro
-           dos meshes da base (montados) em world e ajustamos baseSpin +
-           boxGroup de forma a que a geometria fique exatamente no mesmo sítio. */
-        if (baseSpin && boxGroup && insertData) {
+        /* ── INSERT (FEFCO_0330): preparar pivô de rotação da LID ──
+           Para a lid rodar 180° SOBRE SI MESMA (sem orbitar) o lidSpin tem
+           de estar no CENTRO da lid. Medimos o centro dos meshes da lid
+           (montada) em world e ajustamos lidSpin + lidGroup de forma a que
+           a geometria fique exactamente no mesmo sítio. */
+        if (lidSpin && lidGroup && insertData) {
             updateFolds(1);                 /* medir com a caixa montada */
             scene.updateMatrixWorld(true);
-            var baseBox = new THREE.Box3();
-            boxGroup.traverse(function(o){ if (o.isMesh) baseBox.expandByObject(o); });
-            if (!baseBox.isEmpty()) {
-                var ctr = baseBox.getCenter(new THREE.Vector3());
-                /* ctr está em world; baseSpin é filho de boxPivot (que pode ter
-                   quaternion). Converter ctr para o espaço local de boxPivot. */
+            var lidBox0 = new THREE.Box3();
+            lidGroup.traverse(function(o){ if (o.isMesh) lidBox0.expandByObject(o); });
+            if (!lidBox0.isEmpty()) {
+                var ctr = lidBox0.getCenter(new THREE.Vector3());
                 var ctrLocal = boxPivot.worldToLocal(ctr.clone());
-                insertData.baseSpinPivot = ctrLocal;          /* onde pôr o baseSpin */
-                insertData.boxGroupBase  = boxGroup.position.clone(); /* posição original */
-            }
-            /* centro da LID (para centrar a câmara nela durante o insert) */
-            if (lidGroup) {
-                var lidBox = new THREE.Box3();
-                lidGroup.traverse(function(o){ if (o.isMesh) lidBox.expandByObject(o); });
-                if (!lidBox.isEmpty()) {
-                    insertData.lidCenter = boxPivot.worldToLocal(lidBox.getCenter(new THREE.Vector3()));
-                }
+                insertData.lidSpinPivot = ctrLocal;             /* onde pôr o lidSpin */
+                insertData.lidGroupBase = lidGroup.position.clone(); /* posição original */
             }
 
-            /* ── Ajustar baseDepth medindo o estado final do encaixe ──
-               Aplicamos o estado final (base rodada+deslocada, lid fechado) e
-               medimos o eixo de aproximação (Z em world). Queremos que o TOPO da
-               base toque o FUNDO da tampa fechada — sem penetrar nem ficar curto.
-               O ajuste é a diferença medida, somada ao baseDepth. */
-            if (lidGroup && insertData.baseSpinPivot) {
-                insertData.baseCorr = { x: 0, z: 0 };
-                /* Mede o estado final do encaixe → centros (X,Z) da base e da
-                   tampa em world. */
+            /* ── Ajustar lidDepth medindo o estado final do encaixe ──
+               Aplicamos o estado final (lid rodada+deslocada) e medimos o
+               eixo de aproximação (Y em world — profundidade/altura da
+               caixa). Queremos que o FUNDO da lid fechada toque o TOPO da
+               base — sem penetrar nem ficar curto. O ajuste é a diferença
+               medida, somada a lidDepth. */
+            if (insertData.lidSpinPivot) {
+                insertData.lidCorr = { x: 0, z: 0 };
                 function measureCenters() {
                     enterInsertMode();
                     applyInsertProgress(1);
@@ -409,32 +415,32 @@
                         l: lB.getCenter(new THREE.Vector3()),
                     };
                 }
-                /* Iterar o sistema 2x2 até o gap convergir a ~0. Cada iteração
-                   sonda a sensibilidade real e resolve; repetir absorve não-
-                   linearidades e gaps grandes. */
+                /* Iterar o sistema 2x2 (X, Z-da-cena) até o gap convergir a
+                   ~0. Cada iteração sonda a sensibilidade real e resolve;
+                   repetir absorve não-linearidades e gaps grandes. */
                 for (var iter = 0; iter < 4; iter++) {
                     var m0 = measureCenters();
                     if (!m0) break;
-                    insertData.baseCorr.x += 10;
+                    insertData.lidCorr.x += 10;
                     var mX = measureCenters();
-                    insertData.baseCorr.x -= 10;
-                    insertData.baseCorr.z += 10;
+                    insertData.lidCorr.x -= 10;
+                    insertData.lidCorr.z += 10;
                     var mZ = measureCenters();
-                    insertData.baseCorr.z -= 10;
+                    insertData.lidCorr.z -= 10;
                     if (!mX || !mZ) break;
-                    var dXperX = (mX.b.x - m0.b.x) / 10;
-                    var dZperX = (mX.b.z - m0.b.z) / 10;
-                    var dXperZ = (mZ.b.x - m0.b.x) / 10;
-                    var dZperZ = (mZ.b.z - m0.b.z) / 10;
-                    var gapX = m0.l.x - m0.b.x;
-                    var gapZ = m0.l.z - m0.b.z;
+                    var dXperX = (mX.l.x - m0.l.x) / 10;
+                    var dZperX = (mX.l.z - m0.l.z) / 10;
+                    var dXperZ = (mZ.l.x - m0.l.x) / 10;
+                    var dZperZ = (mZ.l.z - m0.l.z) / 10;
+                    var gapX = m0.b.x - m0.l.x;
+                    var gapZ = m0.b.z - m0.l.z;
                     if (Math.abs(gapX) < 1 && Math.abs(gapZ) < 1) break; /* convergiu */
                     var det = dXperX * dZperZ - dXperZ * dZperX;
                     if (Math.abs(det) < 1e-6) break;
-                    insertData.baseCorr.x += ( gapX * dZperZ - dXperZ * gapZ) / det;
-                    insertData.baseCorr.z += (dXperX * gapZ -  gapX * dZperX) / det;
+                    insertData.lidCorr.x += ( gapX * dZperZ - dXperZ * gapZ) / det;
+                    insertData.lidCorr.z += (dXperX * gapZ -  gapX * dZperX) / det;
                     console.log('[INSERT] iter', iter, ' gapX=', gapX.toFixed(1), ' gapZ=', gapZ.toFixed(1),
-                                ' corr=', insertData.baseCorr.x.toFixed(1), insertData.baseCorr.z.toFixed(1));
+                                ' corr=', insertData.lidCorr.x.toFixed(1), insertData.lidCorr.z.toFixed(1));
                 }
             }
 
@@ -843,9 +849,9 @@
     function updateFolds(t) {
         /* Timeline combinada (só quando há insertData / FEFCO_0330):
              0 … INSERT_START  → dobras das abas (remapeadas para 0..1)
-             INSERT_START … 1  → sequência de encaixe base+lid
+             INSERT_START … 1  → sequência de encaixe lid→base
            Sem insertData, as dobras usam o t inteiro (0..1) como antes. */
-        var hasInsert = !!(insertData && baseSpin);
+        var hasInsert = !!(insertData && lidSpin);
         var foldT = t;
         if (hasInsert) {
             foldT = INSERT_START > 0 ? Math.min(t, INSERT_START) / INSERT_START : t;
@@ -853,7 +859,6 @@
 
         for (var i = 0; i < folds.length; i++) {
             var f = folds[i];
-            /* mapear foldT global para t local [0,1] dentro da janela desta dobra */
             var tS = f.tStart !== undefined ? f.tStart : 0;
             var tE = f.tEnd   !== undefined ? f.tEnd   : 1;
             var tLocal = tE > tS ? (foldT - tS) / (tE - tS) : foldT;
@@ -861,18 +866,9 @@
             var k = ease(tLocal);
             f.pivot.rotation.x = k * deg2rad(f.angle) * f.sign;
         }
-        /* Animar translação XYZ do lid: do estado plano para encaixe por cima */
-        if (lidGroup && lidAnimData) {
-            var la = lidAnimData;
-            var tLid = la.tEnd > la.tStart ? (foldT - la.tStart) / (la.tEnd - la.tStart) : foldT;
-            tLid = Math.max(0, Math.min(1, tLid));
-            var kLid = ease(tLid);
-            lidGroup.position.x = la.flatX + kLid * (la.mountX - la.flatX);
-            lidGroup.position.y = la.flatY + kLid * (la.mountY - la.flatY);
-            lidGroup.position.z = la.flatZ + kLid * (la.mountZ - la.flatZ);
-        }
 
-        /* Fase de encaixe (base+lid) na segunda parte da timeline. */
+        /* Fase de encaixe (lid roda+viaja até à base) na segunda parte da
+           timeline. */
         if (hasInsert) {
             if (t >= INSERT_START) {
                 enterInsertMode();
@@ -889,9 +885,8 @@
         boxGroup = null;
         baseSpin = null;
         lidGroup = null;
-        lidAnimData = null;
+        lidSpin = null;
         insertData = null;
-        insertT = 0; insertDir = 1;
         _insertActive = false;
         var btnInsert = document.getElementById('ctrl-insert');
         if (btnInsert) btnInsert.style.display = 'none';
@@ -1116,8 +1111,8 @@
                total quase igual mas suaviza o arranque/fecho. */
             var EDGE = 0.35; /* fracção de velocidade mínima nos extremos */
             var ramp = EDGE + (1 - EDGE) * Math.sin(Math.PI * animT);
-            /* Fase de encaixe (rotações grandes da base+lid) é mais lenta para
-               não parecer cómica. */
+            /* Fase de encaixe (rotação grande da lid) é mais lenta para não
+               parecer cómica. */
             var phaseSpeed = (insertData && animT >= INSERT_START) ? 0.40 : 1.0;
             animT += 0.0046 * ramp * phaseSpeed * animDir;
             if (animT >= 1) { animT = 1; animDir = -1; }
@@ -1147,57 +1142,53 @@
         return n.applyQuaternion(q).normalize();
     }
 
-    /* Setup do modo insert (idempotente): só posiciona o pivô da base sobre o
+    /* Setup do modo insert (idempotente): só posiciona o pivô da LID sobre o
        seu centro (para a rotação ser no sítio) e prepara a ordem de rotação.
-       NÃO mexe na câmara (mantém a vista do utilizador) nem aplica rotação fixa
-       — o 90°/180° são animados em applyInsertProgress. */
+       NÃO mexe na câmara nem aplica rotação fixa — o 180°/90° são animados
+       em applyInsertProgress. A base nunca se move. */
     function enterInsertMode() {
         if (_insertActive || !insertData) return;
         _insertActive = true;
-        if (baseSpin && boxGroup && insertData.baseSpinPivot) {
-            baseSpin.position.copy(insertData.baseSpinPivot);
-            boxGroup.position.copy(insertData.boxGroupBase).sub(insertData.baseSpinPivot);
-            baseSpin.rotation.order = 'ZYX';
+        if (lidSpin && lidGroup && insertData.lidSpinPivot) {
+            lidSpin.position.copy(insertData.lidSpinPivot);
+            lidGroup.position.copy(insertData.lidGroupBase).sub(insertData.lidSpinPivot);
+            lidSpin.rotation.order = 'ZYX';
         }
     }
 
-    /* Teardown do modo insert (idempotente): repõe base e lid ao estado da
-       caixa montada (sem encaixe). NÃO toca na câmara. */
+    /* Teardown do modo insert (idempotente): repõe a lid ao estado natural
+       (lado a lado, sem encaixe). A base nunca se move. NÃO toca na câmara. */
     function exitInsertMode() {
         if (!_insertActive) return;
         _insertActive = false;
-        if (baseSpin) { baseSpin.rotation.set(0, 0, 0); baseSpin.position.set(0, 0, 0); }
-        if (boxGroup && insertData && insertData.boxGroupBase) boxGroup.position.copy(insertData.boxGroupBase);
-        if (lidGroup && insertData && insertData.lidNatural) lidGroup.position.copy(insertData.lidNatural);
+        if (lidSpin) { lidSpin.rotation.set(0, 0, 0); lidSpin.position.set(0, 0, 0); }
+        if (lidGroup && insertData && insertData.lidGroupBase) lidGroup.position.copy(insertData.lidGroupBase);
     }
 
     /* Progresso da animação de encaixe, p em [0,1]:
-       FASE 1 (p 0→0.5): base vira de costas (180° Y, animado) + roda 90° (Z) +
-                         desloca-se para a sua posição (encaixe + offset Z).
-       FASE 2 (p 0.5→1): lid fecha em direção à base. */
-    function applyInsertProgress(p) {
-        if (!insertData || !baseSpin) return;
-        var kBase = ease(Math.min(p, 0.5) / 0.5);
-        var kLid  = ease(Math.max(p - 0.5, 0) / 0.5);
+       a POSIÇÃO final da lid (kLid, 0→1) e o seu cálculo (lidDx/lidDz/
+       lidDepth/lidCorr) não mudam — chegam exactamente ao mesmo sítio de
+       sempre. Só o ÂNGULO VISÍVEL da rotação é reduzido (LID_SPIN_VISUAL_DEG
+       em vez de 180°): a lid pára de rodar a meio do percurso mas continua a
+       deslizar até à posição final, chegando lá com uma amplitude de
+       rotação menor. */
+    var LID_SPIN_VISUAL_DEG = 180;
 
-        baseSpin.rotation.y = kBase * Math.PI;        /* 180° de costas, animado */
-        baseSpin.rotation.z = kBase * (Math.PI / 2);  /* 90° sobre si mesma */
-        if (insertData.baseSpinPivot) {
-            /* Deslocamento original (baseDx/baseDz/baseDepth) que leva a base para
-               sob o lid + correção world medida (baseCorr) para afinar o encaixe. */
-            var corr = insertData.baseCorr || { x: 0, z: 0 };
-            baseSpin.position.set(
-                insertData.baseSpinPivot.x + (insertData.baseDx + corr.x) * kBase,
-                insertData.baseSpinPivot.y,
-                insertData.baseSpinPivot.z + (insertData.baseDz + insertData.baseDepth + corr.z) * kBase
+    function applyInsertProgress(p) {
+        if (!insertData || !lidSpin) return;
+        var kLid = ease(p);
+        var kRot = Math.min(kLid * (180 / LID_SPIN_VISUAL_DEG), 1);
+
+        lidSpin.rotation.y = kRot * deg2rad(LID_SPIN_VISUAL_DEG);
+        if (insertData.lidSpinPivot) {
+            var corr = insertData.lidCorr || { x: 0, z: 0 };
+            lidSpin.position.set(
+                insertData.lidSpinPivot.x + (insertData.lidDx + corr.x) * kLid,
+                insertData.lidSpinPivot.y,
+                insertData.lidSpinPivot.z + (insertData.lidDz + insertData.lidDepth + corr.z) * kLid
             );
         }
-        if (lidGroup) {
-            lidGroup.position.lerpVectors(insertData.lidNatural, insertData.lidEncaix, kLid);
-        }
     }
-
-
 
     /* Grava a configuração actual na sale.order.dieline e devolve uma Promise
        com o ID do registo criado. Chamado antes do "Add to Cart". */
@@ -1233,16 +1224,12 @@
     wire('ctrl-2d',     function () { setView('2d'); });
     wire('ctrl-logo2d', function () { setView('logo2d'); });
     wire('ctrl-anim', function () { animPlaying ? stopAnim() : startAnim(); });
-    /* Botão insert desativado — a sequência de encaixe é agora parte do play
-       normal (dobras 0→INSERT_START, encaixe INSERT_START→1).
-    wire('ctrl-insert', function () { insertPlaying ? stopInsert() : startInsert(); });
-    */
+    /* Botão insert desativado — não há sequência de encaixe animada. */
     wire('ctrl-rotate', function () { autoRotate = !autoRotate; var el = document.getElementById('ctrl-rotate'); if (el) el.classList.toggle('active', autoRotate); });
     wire('ctrl-zoom-in',  function () { sph.r = Math.max(ZOOM_MIN, sph.r - sceneSize * 0.08); updateCam(); });
     wire('ctrl-zoom-out', function () { sph.r = Math.min(ZOOM_MAX, sph.r + sceneSize * 0.08); updateCam(); });
     wire('ctrl-reset', function () {
         stopAnim(); animT = 0; animDir = 1; updateSlider(0);
-        exitInsertMode();      /* repõe base/lid/câmara do encaixe */
         updateFolds(0);        /* planifica as dobras */
         sph.r = (flatSize / 2) / Math.tan((45 / 2) * Math.PI / 180) * 1.7; updateCam();
     });
